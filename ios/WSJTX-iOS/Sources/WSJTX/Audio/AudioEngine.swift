@@ -42,15 +42,20 @@ public final class AudioEngine: ObservableObject {
         }
     }
 
+    private let txSampleRate: Double = 48_000  // hardware output rate for TX
+
     private func setupGraph() {
         let input  = engine.inputNode
-        let format  = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+        let rxFmt  = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
+        let txFmt  = AVAudioFormat(standardFormatWithSampleRate: txSampleRate, channels: 1)!
 
         engine.attach(playerNode)
-        engine.connect(playerNode, to: engine.mainMixerNode, format: nil)
+        // Connect player node with the same explicit format used for TX buffers;
+        // mismatched formats are what caused the NSException / SIGABRT on transmit.
+        engine.connect(playerNode, to: engine.mainMixerNode, format: txFmt)
 
         // Down-sample tap: capture at 48 kHz, present 12 kHz to decoder
-        input.installTap(onBus: 0, bufferSize: 4096, format: format) { [weak self] buf, _ in
+        input.installTap(onBus: 0, bufferSize: 4096, format: rxFmt) { [weak self] buf, _ in
             guard let self, let data = buf.floatChannelData?[0] else { return }
             let count = Int(buf.frameLength)
             let samples = Array(UnsafeBufferPointer(start: data, count: count))
@@ -82,8 +87,9 @@ public final class AudioEngine: ObservableObject {
     // MARK: - Transmit
 
     /// Converts FSK symbol indices to an audio waveform and plays it.
+    /// Synthesises at 48 kHz to match the playerNode's output connection format.
     public func transmit(symbols: [Int], mode: RadioMode) {
-        let sampleRate = targetRate
+        let sampleRate = txSampleRate  // 48 kHz — must match the playerNode connection format
         let symLen = Int(sampleRate / mode.toneSeparation)  // samples per symbol
         let totalSamples = symbols.count * symLen
         var wave = [Float](repeating: 0, count: totalSamples)
@@ -120,7 +126,8 @@ public final class AudioEngine: ObservableObject {
             buf.floatChannelData?[0].update(from: ptr.baseAddress!, count: wave.count)
         }
 
-        playerNode.play()
+        guard engine.isRunning else { return }
+        if !playerNode.isPlaying { playerNode.play() }
         playerNode.scheduleBuffer(buf) { [weak self] in
             DispatchQueue.main.async { self?.playerNode.stop() }
         }
