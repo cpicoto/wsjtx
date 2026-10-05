@@ -25,6 +25,7 @@ final class AppState: ObservableObject {
     @Published var currentBand: Band = .m20
     @Published var currentMode: RadioMode = .ft8
     @Published var transmitting = false
+    @Published var txError: String? = nil   // shown in UI when TX is blocked
     @Published var dxCall = ""
     @Published var dxGrid = ""
     @Published var txMessage = ""
@@ -75,14 +76,22 @@ final class AppState: ObservableObject {
 
     func transmit(message: String) {
         guard !settings.myCall.isEmpty else {
-            print("[TX] No callsign set — set your callsign in Settings first")
+            txError = "Set your callsign in Settings before transmitting."
+            return
+        }
+        // FT8 and FT4 have complete encoder support. Other modes use FT8's
+        // frame structure as a placeholder — flag this clearly.
+        guard currentMode == .ft8 || currentMode == .ft4 else {
+            txError = "\(currentMode.rawValue) transmit is not yet supported. Switch to FT8 or FT4."
             return
         }
         let symbols = encoder.encode(message: message, mode: currentMode)
         guard !symbols.isEmpty else {
-            print("[TX] Encode failed for message: \(message)")
+            txError = "Could not encode message: \(message)"
+            print("[TX] Encode failed for: \(message)")
             return
         }
+        txError = nil
         print("[TX] Transmitting \(symbols.count) symbols: \(message)")
         audioEngine.transmit(symbols: symbols, mode: currentMode) { [weak self] in
             DispatchQueue.main.async { self?.transmitting = false }

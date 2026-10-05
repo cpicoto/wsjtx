@@ -92,7 +92,8 @@ public final class AudioEngine: ObservableObject {
     // MARK: - Transmit
 
     /// Converts FSK symbol indices to an audio waveform and plays it.
-    /// `completion` is called on the main thread when the buffer finishes playing.
+    /// Synthesis runs on a background queue so the MainActor is never blocked.
+    /// `completion` is called on the main thread when playback finishes.
     public func transmit(symbols: [Int], mode: RadioMode, completion: (() -> Void)? = nil) {
         guard engine.isRunning else {
             print("[AudioEngine] Engine not running — start RX first")
@@ -103,7 +104,7 @@ public final class AudioEngine: ObservableObject {
             return
         }
 
-        // Query the actual connection format so the buffer always matches.
+        // Snapshot format on the calling thread (safe to query from any thread).
         let nodeFmt    = playerNode.outputFormat(forBus: 0)
         let sampleRate = nodeFmt.sampleRate
         guard sampleRate > 0 else {
@@ -111,45 +112,50 @@ public final class AudioEngine: ObservableObject {
             return
         }
 
-        let symLen       = Int(sampleRate / mode.toneSeparation)
-        let totalSamples = symbols.count * symLen
-        var wave  = [Float](repeating: 0, count: totalSamples)
-        var phase: Double = 0
-        let baseFreq = 1_000.0   // base audio offset Hz
+        // Run synthesis on a background queue — never block the MainActor.
+        processingQ.async { [weak self] in
+            guard let self else { return }
 
-        for (i, sym) in symbols.enumerated() {
-            let freq  = baseFreq + Double(sym) * mode.toneSeparation
-            let start = i * symLen
-            for j in 0 ..< symLen {
-                wave[start + j] = Float(sin(2 * .pi * freq * Double(j) / sampleRate + phase))
+            let symLen       = Int(sampleRate / mode.toneSeparation)
+            let totalSamples = symbols.count * symLen
+            var wave  = [Float](repeating: 0, count: totalSamples)
+            var phase: Double = 0
+            let baseFreq = 1_000.0  // base audio offset Hz
+
+            for (i, sym) in symbols.enumerated() {
+                let freq  = baseFreq + Double(sym) * mode.toneSeparation
+                let start = i * symLen
+                for j in 0 ..< symLen {
+                    wave[start + j] = Float(sin(2 * .pi * freq * Double(j) / sampleRate + phase))
+                }
+                phase += 2 * .pi * freq * Double(symLen) / sampleRate
             }
-            phase += 2 * .pi * freq * Double(symLen) / sampleRate
-        }
 
-        // Raised-cosine ramp (8 ms) to avoid key clicks
-        let rampLen = max(1, Int(sampleRate * 0.008))
-        for i in 0 ..< min(rampLen, wave.count) {
-            let env = Float(0.5 * (1 - cos(.pi * Double(i) / Double(rampLen))))
-            wave[i] *= env
-            wave[wave.count - 1 - i] *= env
-        }
+            // Raised-cosine ramp (8 ms) — avoids key clicks / transient splatter
+            let rampLen = max(1, Int(sampleRate * 0.008))
+            for i in 0 ..< min(rampLen, wave.count) {
+                let env = Float(0.5 * (1 - cos(.pi * Double(i) / Double(rampLen))))
+                wave[i] *= env
+                wave[wave.count - 1 - i] *= env
+            }
 
-        guard let buf = AVAudioPCMBuffer(pcmFormat: nodeFmt,
-                                         frameCapacity: AVAudioFrameCount(totalSamples))
-        else {
-            print("[AudioEngine] Failed to create PCM buffer (fmt=\(nodeFmt), frames=\(totalSamples))")
-            return
-        }
-        buf.frameLength = AVAudioFrameCount(totalSamples)
-        for ch in 0 ..< Int(nodeFmt.channelCount) {
-            buf.floatChannelData?[ch].update(from: wave, count: totalSamples)
-        }
+            guard let buf = AVAudioPCMBuffer(pcmFormat: nodeFmt,
+                                             frameCapacity: AVAudioFrameCount(totalSamples))
+            else {
+                print("[AudioEngine] Failed to create PCM buffer (\(totalSamples) frames)")
+                return
+            }
+            buf.frameLength = AVAudioFrameCount(totalSamples)
+            for ch in 0 ..< Int(nodeFmt.channelCount) {
+                buf.floatChannelData?[ch].update(from: wave, count: totalSamples)
+            }
 
-        print("[AudioEngine] Scheduling \(totalSamples) frames at \(sampleRate) Hz (\(nodeFmt.channelCount) ch)")
-        if !playerNode.isPlaying { playerNode.play() }
-        playerNode.scheduleBuffer(buf, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-            self?.playerNode.stop()
-            completion?()
+            print("[AudioEngine] Scheduling \(totalSamples) frames at \(sampleRate) Hz (\(nodeFmt.channelCount) ch)")
+            if !self.playerNode.isPlaying { self.playerNode.play() }
+            self.playerNode.scheduleBuffer(buf, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+                self?.playerNode.stop()
+                completion?()
+            }
         }
     }
 

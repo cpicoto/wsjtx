@@ -97,6 +97,12 @@ public struct ComposeMessageView: View {
                     .listRowBackground(app.transmitting ? Color.red : Color.accentColor)
                     .foregroundStyle(.white)
                     .disabled(app.settings.myCall.isEmpty)
+
+                    if let err = app.txError {
+                        Text(err)
+                            .font(.caption)
+                            .foregroundStyle(.red)
+                    }
                 }
             }
             .navigationTitle("Compose TX")
