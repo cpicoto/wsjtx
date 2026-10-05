@@ -29,7 +29,7 @@ public struct MainView: View {
                 .tag(3)
         }
         .onAppear {
-            if !app.settings.myCall.isEmpty { app.startListening() }
+            app.startListening()   // always start RX; TX still requires a callsign
         }
     }
 }
@@ -84,8 +84,11 @@ struct WaterfallTabView: View {
             }
         }
         .onAppear {
-            app.audioEngine.onSampleBuffer = { samples, rate in
+            // Feed samples to both the waterfall display and the FT8 decoder.
+            // (Replaces the decoder-only wire set in AppState.init.)
+            app.audioEngine.onSampleBuffer = { [weak app] samples, rate in
                 waterfall.ingest(samples: samples)
+                app?.decoder.ingest(samples: samples, sampleRate: rate)
             }
             startCycleTimer()
         }
