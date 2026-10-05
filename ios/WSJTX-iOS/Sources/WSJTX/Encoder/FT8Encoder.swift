@@ -173,19 +173,19 @@ public final class FT8Encoder {
     // MARK: - LDPC (174, 87) encoding
 
     /// Systematic LDPC encoder: appends 87 parity bits to the 87 information bits.
+    /// The FT8 message is 77 bits; bits 77-86 are implicit zeros (systematic padding).
     private func ldpcEncode(bits: [Int]) -> [Int] {
         let k = 87
-        let n = FT8Protocol.codedBits
+        let n = FT8Protocol.codedBits  // 174
+        // Pad the 77-bit message to k=87 bits with zeros (systematic LDPC input).
         var coded = bits + [Int](repeating: 0, count: n - bits.count)
 
-        // Generator matrix G (systematic form): parity bits = G_P × info bits (mod 2)
-        // The full 87×87 G_P matrix is defined in the WSJT-X source as
-        // ldpc_174_87_b_generator.f90. We include a placeholder that passes
-        // the systematic bits through; a production build links the Fortran object.
+        // Generate parity bits using the approximate circulant G_P matrix.
+        // Use coded[j] (not bits[j]) so indices 77-86 safely read the zero padding.
         for i in k ..< n {
             var parity = 0
             for j in 0 ..< k {
-                parity ^= bits[j] & generatorBit(row: i - k, col: j)
+                parity ^= coded[j] & generatorBit(row: i - k, col: j)
             }
             coded[i] = parity
         }
