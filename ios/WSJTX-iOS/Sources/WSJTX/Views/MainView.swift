@@ -65,7 +65,7 @@ struct WaterfallTabView: View {
                     CycleTimerView(secondsRemaining: $secondsRemaining,
                                    cycleLength: Int(app.currentMode.cycleLength))
                     Spacer()
-                    LevelMeter(level: app.audioEngine.inputLevel)
+                    LevelMeter(engine: app.audioEngine)
                 }
                 .padding(.horizontal, 12)
                 .padding(.vertical, 4)
@@ -79,7 +79,7 @@ struct WaterfallTabView: View {
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .navigationBarTrailing) {
-                    Button(app.audioEngine.isRunning ? "Stop" : "Listen") {
+                    ListenButton(engine: app.audioEngine) {
                         app.audioEngine.isRunning ? app.stopListening() : app.startListening()
                     }
                 }
@@ -164,8 +164,10 @@ struct CycleTimerView: View {
 
 // MARK: - Level Meter
 
+/// Observes AudioEngine directly so @Published inputLevel re-renders this view
+/// independently of the parent view's update cycle.
 struct LevelMeter: View {
-    let level: Float   // 0…1
+    @ObservedObject var engine: AudioEngine
 
     var body: some View {
         HStack(spacing: 2) {
@@ -177,7 +179,7 @@ struct LevelMeter: View {
                     RoundedRectangle(cornerRadius: 3).fill(Color(.systemFill))
                     RoundedRectangle(cornerRadius: 3)
                         .fill(levelColor)
-                        .frame(width: geo.size.width * CGFloat(level))
+                        .frame(width: geo.size.width * CGFloat(engine.inputLevel))
                 }
             }
             .frame(width: 80, height: 10)
@@ -185,7 +187,20 @@ struct LevelMeter: View {
     }
 
     private var levelColor: Color {
-        level > 0.85 ? .red : level > 0.6 ? .yellow : .green
+        engine.inputLevel > 0.85 ? .red : engine.inputLevel > 0.6 ? .yellow : .green
+    }
+}
+
+// MARK: - Listen Button
+
+/// Observes AudioEngine directly so the label flips between Stop/Listen
+/// without depending on the parent view's re-render cycle.
+struct ListenButton: View {
+    @ObservedObject var engine: AudioEngine
+    let action: () -> Void
+
+    var body: some View {
+        Button(engine.isRunning ? "Stop" : "Listen", action: action)
     }
 }
 
