@@ -75,7 +75,7 @@ struct QSORow: View {
             VStack(alignment: .trailing, spacing: 2) {
                 Text(record.mode.rawValue)
                     .font(.caption.bold())
-                    .foregroundStyle(.accentColor)
+                    .foregroundStyle(Color.accentColor)
                 Text(record.frequencyMHz + " MHz")
                     .font(.caption2)
                     .foregroundStyle(.secondary)

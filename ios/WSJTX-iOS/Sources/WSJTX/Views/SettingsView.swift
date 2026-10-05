@@ -270,10 +270,4 @@ struct InfoRow: View {
     }
 }
 
-// Expose colorSchemeRaw for settings view binding
-extension AppSettings {
-    var colorSchemeRaw: Int {
-        get { UserDefaults.standard.integer(forKey: "colorSchemeRaw") }
-        set { UserDefaults.standard.set(newValue, forKey: "colorSchemeRaw") }
-    }
-}
+// Expose colorSchemeRaw for settings view binding — property is public on AppSettings.

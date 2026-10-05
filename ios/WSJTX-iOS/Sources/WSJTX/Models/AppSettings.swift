@@ -28,10 +28,19 @@ public final class AppSettings: ObservableObject {
     @AppStorage("tolerance")  public var tolerance   = 4.0  // Hz, frequency pull-in window
 
     // MARK: Logging
-    @AppStorage("logPath")    public var logPath    = Self.defaultLogPath
+    @AppStorage("logPath")    public var logPath    = ""
+
+    /// Resolved log URL; falls back to Documents/wsjtx.adi when path is empty.
+    public var logURL: URL {
+        guard !logPath.isEmpty else {
+            let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
+            return docs.appendingPathComponent("wsjtx.adi")
+        }
+        return URL(fileURLWithPath: logPath)
+    }
 
     // MARK: UI
-    @AppStorage("colorSchemeRaw") private var colorSchemeRaw = 0
+    @AppStorage("colorSchemeRaw") public var colorSchemeRaw = 0
     public var colorScheme: ColorScheme? {
         switch colorSchemeRaw {
         case 1:  return .light
@@ -53,13 +62,4 @@ public final class AppSettings: ObservableObject {
     // MARK: PSK Reporter
     @AppStorage("pskReporter")   public var pskReporterEnabled = false
 
-    // MARK: Helpers
-
-    private static var defaultLogPath: String {
-        let docs = FileManager.default.urls(for: .documentDirectory, in: .userDomainMask).first!
-        return docs.appendingPathComponent("wsjtx.adi").path
-    }
-
-    /// Returns the standard WSJT-X ADIF log file URL.
-    public var logURL: URL { URL(fileURLWithPath: logPath) }
 }

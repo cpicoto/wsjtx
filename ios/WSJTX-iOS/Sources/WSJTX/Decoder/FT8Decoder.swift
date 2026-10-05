@@ -314,11 +314,10 @@ public enum FT8MessagePacker {
         let c28a  = bits2int(bits, from: 0,  count: 28)
         let c28b  = bits2int(bits, from: 28, count: 28)
         let g15   = bits2int(bits, from: 56, count: 15)
-        let r2    = bits2int(bits, from: 71, count: 2)
 
         let callA = unpackCallsign(n28: c28a)
         let callB = unpackCallsign(n28: c28b)
-        let extra = unpackReport(g15: g15, r2: r2)
+        let extra = unpackReport(g15: g15)
 
         return "\(callA) \(callB) \(extra)".trimmingCharacters(in: .whitespaces)
     }
@@ -351,7 +350,7 @@ public enum FT8MessagePacker {
 
     // MARK: Report / Grid unpacking
 
-    private static func unpackReport(g15: Int, r2: Int) -> String {
+    private static func unpackReport(g15: Int) -> String {
         if g15 == 0 { return "" }
         if g15 <= 180 { return String(g15 - 90) }  // SNR -90…+90 dB
         // Maidenhead grid

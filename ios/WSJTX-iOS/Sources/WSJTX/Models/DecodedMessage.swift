@@ -30,11 +30,6 @@ public struct DecodedMessage: Identifiable, Equatable {
 /// Converts a raw WSJT-X text string into a `DecodedMessage`.
 public struct MessageParser {
 
-    /// Standard 77-bit FT8 message format patterns.
-    private static let cqPattern     = #/^CQ\s+(\w+)\s+([A-R]{2}[0-9]{2}[A-X]{0,2})$/#
-    private static let stdPattern    = #/^(\w+)\s+(\w+)\s+([A-R]{2}[0-9]{2}[A-X]{0,2}|[+-]?\d{1,3}|RRR|RR73|73)$/#
-    private static let reportPattern = #/^[+-]?\d{1,3}$/#
-
     public static func parse(
         raw: String,
         snr: Int,

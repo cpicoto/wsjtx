@@ -227,11 +227,11 @@ private extension Data {
 
     mutating func appendUInt32(_ v: UInt32) {
         var n = v.bigEndian
-        withUnsafeBytes(of: &n) { append(contentsOf: $0) }
+        Swift.withUnsafeBytes(of: &n) { append(contentsOf: $0) }
     }
     mutating func appendUInt64(_ v: UInt64) {
         var n = v.bigEndian
-        withUnsafeBytes(of: &n) { append(contentsOf: $0) }
+        Swift.withUnsafeBytes(of: &n) { append(contentsOf: $0) }
     }
     mutating func appendWSJTXString(_ s: String) {
         if s.isEmpty {

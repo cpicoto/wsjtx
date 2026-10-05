@@ -56,12 +56,6 @@ public enum FT8Protocol {
     /// Symbol indices where the third Costas array is placed.
     public static let ft8Costas3: ClosedRange<Int> = 72 ... 78
 
-    /// Symbol indices carrying data (the complement of Costas positions).
-    public static var ft8DataIndices: [Int] {
-        let costas = Set(ft8Costas1) ∪ Set(ft8Costas2) ∪ Set(ft8Costas3)
-        return (0 ..< ft8TotalSymbols).filter { !costas.contains($0) }
-    }
-
     // MARK: LDPC (174, 87) parity-check matrix helpers
 
     /// Generator polynomial degree for the CRC-14 used in FT8.
@@ -74,8 +68,10 @@ public enum FT8Protocol {
 
     /// Maps Grey-coded value to symbol index (decoding).
     public static let greyDecode: [Int] = [0, 1, 3, 2, 7, 6, 4, 5]
-}
 
-private extension Set {
-    static func ∪ (lhs: Set, rhs: Set) -> Set { lhs.union(rhs) }
+    /// Symbol indices carrying data (complement of all Costas positions).
+    public static var ft8DataIndices: [Int] {
+        let costas = Set(ft8Costas1).union(Set(ft8Costas2)).union(Set(ft8Costas3))
+        return (0 ..< ft8TotalSymbols).filter { !costas.contains($0) }
+    }
 }
