@@ -93,8 +93,11 @@ public final class AudioEngine: ObservableObject {
 
     /// Converts FSK symbol indices to an audio waveform and plays it.
     /// Synthesis runs on a background queue so the MainActor is never blocked.
+    /// `baseFreq` sets the lowest tone's audio frequency (Hz); defaults to 1000 Hz.
     /// `completion` is called on the main thread when playback finishes.
-    public func transmit(symbols: [Int], mode: RadioMode, completion: (() -> Void)? = nil) {
+    public func transmit(symbols: [Int], mode: RadioMode,
+                          baseFreq: Double = 1_000,
+                          completion: (() -> Void)? = nil) {
         guard engine.isRunning else {
             print("[AudioEngine] Engine not running — start RX first")
             return
@@ -120,7 +123,7 @@ public final class AudioEngine: ObservableObject {
             let totalSamples = symbols.count * symLen
             var wave  = [Float](repeating: 0, count: totalSamples)
             var phase: Double = 0
-            let baseFreq = 1_000.0  // base audio offset Hz
+            // Use caller-specified base frequency (RX/TX freq from Q65Config or default 1000 Hz)
 
             for (i, sym) in symbols.enumerated() {
                 let freq  = baseFreq + Double(sym) * mode.toneSeparation

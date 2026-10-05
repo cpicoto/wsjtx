@@ -51,19 +51,32 @@ struct WaterfallTabView: View {
                 // ── Band / Mode / Frequency bar ─────────────────────────
                 BandModeBar()
 
+                // ── Q65 config strip (only in Q65 mode) ─────────────────
+                if app.currentMode == .q65 {
+                    Q65ConfigPanel(config: app.q65Config)
+                    Divider()
+                }
+
                 // ── Waterfall ───────────────────────────────────────────
                 WaterfallView(data: waterfall,
-                              dbLow: Float(app.settings.waterfallLow),
-                              dbHigh: Float(app.settings.waterfallHigh))
+                              dbLow:        Float(app.settings.waterfallLow),
+                              dbHigh:       Float(app.settings.waterfallHigh),
+                              rxFreq:       app.currentMode == .q65 ? app.q65Config.rxFreq : 1_000,
+                              txFreq:       app.currentMode == .q65 ? app.q65Config.txFreq : 1_000,
+                              transmitting: app.transmitting)
                     .frame(maxWidth: .infinity)
-                    .frame(height: 280)
+                    .frame(height: app.currentMode == .q65 ? 220 : 280)
 
                 Divider()
 
                 // ── Cycle timer ─────────────────────────────────────────
                 HStack {
-                    CycleTimerView(secondsRemaining: $secondsRemaining,
-                                   cycleLength: Int(app.currentMode.cycleLength))
+                    CycleTimerView(
+                        secondsRemaining: $secondsRemaining,
+                        cycleLength: app.currentMode == .q65
+                            ? app.q65Config.period.rawValue
+                            : Int(app.currentMode.cycleLength)
+                    )
                     Spacer()
                     LevelMeter(engine: app.audioEngine)
                 }
@@ -99,11 +112,13 @@ struct WaterfallTabView: View {
 
     private func startCycleTimer() {
         cycleTimer?.invalidate()
-        cycleTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { _ in
-            let now = Date()
-            let secs = Int(now.timeIntervalSince1970)
-            let cycle = Int(app.currentMode.cycleLength)
-            secondsRemaining = cycle - (secs % cycle)
+        cycleTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak app] _ in
+            guard let app else { return }
+            let now   = Int(Date().timeIntervalSince1970)
+            let cycle = app.currentMode == .q65
+                ? app.q65Config.period.rawValue
+                : Int(app.currentMode.cycleLength)
+            secondsRemaining = cycle - (now % cycle)
         }
     }
 }

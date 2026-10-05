@@ -3,21 +3,22 @@ import UIKit
 
 // MARK: - Waterfall View
 
-/// Scrolling waterfall spectrogram rendered with a UIKit-backed `CALayer` for
-/// performance.  New FFT rows arrive via WaterfallData.onRow (direct callback,
-/// not @Published) so every frame is rendered even under rapid audio input.
+/// Scrolling waterfall spectrogram with RX (green) and TX (red) frequency markers.
 public struct WaterfallView: UIViewRepresentable {
 
     @ObservedObject var data: WaterfallData
 
-    // Frequency axis limits (Hz)
     public var fLow:  Float = 200
     public var fHigh: Float = 3000
-
-    // dB colour map range.  With 2/fftSize normalisation a full-scale sine = 0 dB;
-    // typical phone mic noise floor is around −50 dB.
     public var dbLow:  Float = -55
     public var dbHigh: Float =  10
+
+    /// Audio frequency of the receive window (Hz) — green marker.
+    public var rxFreq: Int = 1_000
+    /// Audio frequency of the transmit carrier (Hz) — red marker.
+    public var txFreq: Int = 1_000
+    /// Show the TX marker in red (true when transmitting).
+    public var transmitting: Bool = false
 
     public func makeUIView(context: Context) -> WaterfallUIView {
         let v = WaterfallUIView()
@@ -25,7 +26,6 @@ public struct WaterfallView: UIViewRepresentable {
         v.fHigh  = fHigh
         v.dbLow  = dbLow
         v.dbHigh = dbHigh
-        // Wire the direct callback so every frame is painted immediately on the main thread.
         data.onRow = { [weak v] bins, freqAxis in
             DispatchQueue.main.async { v?.pushRow(bins, freqAxis: freqAxis) }
         }
@@ -33,8 +33,12 @@ public struct WaterfallView: UIViewRepresentable {
     }
 
     public func updateUIView(_ uiView: WaterfallUIView, context: Context) {
-        uiView.dbLow  = dbLow
-        uiView.dbHigh = dbHigh
+        uiView.dbLow       = dbLow
+        uiView.dbHigh      = dbHigh
+        uiView.rxFreq      = Float(rxFreq)
+        uiView.txFreq      = Float(txFreq)
+        uiView.transmitting = transmitting
+        uiView.setNeedsDisplay()
     }
 }
 
@@ -44,22 +48,23 @@ public final class WaterfallUIView: UIView {
 
     public var fLow:  Float = 200
     public var fHigh: Float = 3000
-    public var dbLow:  Float = -15
-    public var dbHigh: Float =  40
+    public var dbLow:  Float = -55
+    public var dbHigh: Float =  10
+
+    // RX/TX frequency markers
+    public var rxFreq:      Float = 1_000
+    public var txFreq:      Float = 1_000
+    public var transmitting: Bool = false
 
     private let pixelRowHeight: Int = 2
     private var imageBuffer: UIImage?
-    private let imageView = UIImageView()
-    private let freqOverlay = FrequencyAxisOverlay()
+    private let imageView      = UIImageView()
+    private let freqOverlay    = FrequencyAxisOverlay()
+    private let markerOverlay  = FreqMarkerOverlay()
 
-    // Freq cursor (touches)
-    private var selectedHz: Float = 1000
     public var onFrequencySelected: ((Float) -> Void)?
 
-    public override init(frame: CGRect) {
-        super.init(frame: frame)
-        setup()
-    }
+    public override init(frame: CGRect) { super.init(frame: frame); setup() }
     required init?(coder: NSCoder) { super.init(coder: coder); setup() }
 
     private func setup() {
@@ -71,6 +76,11 @@ public final class WaterfallUIView: UIView {
         freqOverlay.translatesAutoresizingMaskIntoConstraints = false
         addSubview(freqOverlay)
 
+        markerOverlay.translatesAutoresizingMaskIntoConstraints = false
+        markerOverlay.backgroundColor = .clear
+        markerOverlay.isUserInteractionEnabled = false
+        addSubview(markerOverlay)
+
         NSLayoutConstraint.activate([
             imageView.topAnchor.constraint(equalTo: topAnchor),
             imageView.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -20),
@@ -81,6 +91,11 @@ public final class WaterfallUIView: UIView {
             freqOverlay.bottomAnchor.constraint(equalTo: bottomAnchor),
             freqOverlay.leadingAnchor.constraint(equalTo: leadingAnchor),
             freqOverlay.trailingAnchor.constraint(equalTo: trailingAnchor),
+
+            markerOverlay.topAnchor.constraint(equalTo: topAnchor),
+            markerOverlay.bottomAnchor.constraint(equalTo: imageView.bottomAnchor),
+            markerOverlay.leadingAnchor.constraint(equalTo: leadingAnchor),
+            markerOverlay.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
@@ -93,11 +108,9 @@ public final class WaterfallUIView: UIView {
         let width = Int(bounds.width) > 0 ? Int(bounds.width) : 375
         let height = pixelRowHeight
 
-        // Map freq axis to pixel x, interpolate dB → colour
         let pixels = mapRow(row, freqAxis: freqAxis, width: width)
         let newStrip = renderStrip(pixels: pixels, width: width, height: height)
 
-        // Compose: new strip at top, shift old image down
         let totalHeight = Int(imageView.bounds.height > 0 ? imageView.bounds.height : 280)
         UIGraphicsBeginImageContextWithOptions(CGSize(width: width, height: totalHeight), false, 1)
         newStrip.draw(in: CGRect(x: 0, y: 0, width: width, height: height))
@@ -107,11 +120,19 @@ public final class WaterfallUIView: UIView {
         let composed = UIGraphicsGetImageFromCurrentImageContext()
         UIGraphicsEndImageContext()
 
-        imageBuffer  = composed
+        imageBuffer     = composed
         imageView.image = composed
         freqOverlay.fLow  = fLow
         freqOverlay.fHigh = fHigh
         freqOverlay.setNeedsDisplay()
+
+        // Refresh frequency marker lines
+        markerOverlay.fLow        = fLow
+        markerOverlay.fHigh       = fHigh
+        markerOverlay.rxFreq      = rxFreq
+        markerOverlay.txFreq      = txFreq
+        markerOverlay.transmitting = transmitting
+        markerOverlay.setNeedsDisplay()
     }
 
     // MARK: - Colour mapping
@@ -170,8 +191,56 @@ public final class WaterfallUIView: UIView {
         let w  = imageView.bounds.width
         guard w > 0 else { return }
         let hz = fLow + (fHigh - fLow) * Float(pt.x / w)
-        selectedHz = hz
+        rxFreq = hz
         onFrequencySelected?(hz)
+        markerOverlay.rxFreq = hz
+        markerOverlay.setNeedsDisplay()
+    }
+}
+
+// MARK: - Frequency Marker Overlay
+
+/// Draws thin vertical lines for the RX (green) and TX (red) audio frequencies.
+final class FreqMarkerOverlay: UIView {
+    var fLow:  Float = 200
+    var fHigh: Float = 3000
+    var rxFreq: Float = 1_000
+    var txFreq: Float = 1_000
+    var transmitting: Bool = false
+
+    private func xPos(for freq: Float, in rect: CGRect) -> CGFloat {
+        CGFloat((freq - fLow) / (fHigh - fLow)) * rect.width
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let ctx = UIGraphicsGetCurrentContext() else { return }
+
+        // RX marker — always shown
+        let rx = xPos(for: rxFreq, in: rect)
+        ctx.setStrokeColor(UIColor.green.withAlphaComponent(0.85).cgColor)
+        ctx.setLineWidth(1.5)
+        ctx.setLineDash(phase: 0, lengths: [4, 2])
+        ctx.move(to: CGPoint(x: rx, y: 0))
+        ctx.addLine(to: CGPoint(x: rx, y: rect.height))
+        ctx.strokePath()
+
+        // TX marker — solid red only when different from RX or transmitting
+        if txFreq != rxFreq || transmitting {
+            let tx = xPos(for: txFreq, in: rect)
+            ctx.setStrokeColor((transmitting ? UIColor.red : UIColor.red.withAlphaComponent(0.5)).cgColor)
+            ctx.setLineWidth(transmitting ? 2 : 1)
+            ctx.setLineDash(phase: 0, lengths: [])
+            ctx.move(to: CGPoint(x: tx, y: 0))
+            ctx.addLine(to: CGPoint(x: tx, y: rect.height))
+            ctx.strokePath()
+        }
+
+        // Label RX freq at top
+        let attr: [NSAttributedString.Key: Any] = [
+            .font: UIFont.monospacedSystemFont(ofSize: 9, weight: .regular),
+            .foregroundColor: UIColor.green
+        ]
+        ("\(Int(rxFreq))Hz" as NSString).draw(at: CGPoint(x: rx + 2, y: 2), withAttributes: attr)
     }
 }
 

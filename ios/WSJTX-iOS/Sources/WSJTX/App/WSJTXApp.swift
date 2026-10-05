@@ -21,6 +21,7 @@ final class AppState: ObservableObject {
     @Published var decoder: FT8Decoder
     @Published var encoder: FT8Encoder
     @Published var q65Encoder: Q65Encoder
+    @Published var q65Config  = Q65Config()
     @Published var messages: [DecodedMessage] = []
     @Published var logbook: [QSORecord] = []
     @Published var currentBand: Band = .m20
@@ -95,7 +96,7 @@ final class AppState: ObservableObject {
             symbols = encoded
 
         case .q65:
-            let encoded = q65Encoder.encode(message: message, subMode: q65SubMode)
+            let encoded = q65Encoder.encode(message: message, subMode: q65Config.subMode)
             guard !encoded.isEmpty else {
                 txError = "Could not encode Q65 message: \(message)"
                 return
@@ -108,8 +109,9 @@ final class AppState: ObservableObject {
         }
 
         txError = nil
-        print("[TX] \(currentMode.rawValue) \(symbols.count) symbols: \(message)")
-        audioEngine.transmit(symbols: symbols, mode: currentMode) { [weak self] in
+        let txFreq = currentMode == .q65 ? Double(q65Config.txFreq) : 1_000.0
+        print("[TX] \(currentMode.rawValue) \(symbols.count) symbols @ \(Int(txFreq))Hz: \(message)")
+        audioEngine.transmit(symbols: symbols, mode: currentMode, baseFreq: txFreq) { [weak self] in
             DispatchQueue.main.async { self?.transmitting = false }
         }
         transmitting = true
