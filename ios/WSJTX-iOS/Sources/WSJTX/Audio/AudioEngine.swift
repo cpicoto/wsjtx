@@ -31,8 +31,11 @@ public final class AudioEngine: ObservableObject {
     private func setupSession() {
         let session = AVAudioSession.sharedInstance()
         do {
+            // Use .default mode (not .measurement) so the output path is fully
+            // active and routes audio to the speaker / headphones at full quality.
+            // .measurement is input-only optimisation and can suppress TX output.
             try session.setCategory(.playAndRecord,
-                                    mode: .measurement,
+                                    mode: .default,
                                     options: [.defaultToSpeaker, .allowBluetooth])
             try session.setPreferredSampleRate(48_000)
             try session.setPreferredIOBufferDuration(0.02)
@@ -82,58 +85,71 @@ public final class AudioEngine: ObservableObject {
         isRunning = false
     }
 
+    public func stopTransmit() {
+        playerNode.stop()
+    }
+
     // MARK: - Transmit
 
     /// Converts FSK symbol indices to an audio waveform and plays it.
-    /// Queries the playerNode's actual output format after engine start so the
-    /// buffer format always matches the connection — fixing the SIGABRT crash
-    /// without breaking the input tap.
-    public func transmit(symbols: [Int], mode: RadioMode) {
-        guard engine.isRunning else { return }
+    /// `completion` is called on the main thread when the buffer finishes playing.
+    public func transmit(symbols: [Int], mode: RadioMode, completion: (() -> Void)? = nil) {
+        guard engine.isRunning else {
+            print("[AudioEngine] Engine not running — start RX first")
+            return
+        }
+        guard !symbols.isEmpty else {
+            print("[AudioEngine] Empty symbol array — encode failed")
+            return
+        }
 
-        // Use the format the engine actually assigned to the player node connection.
-        let nodeFmt   = playerNode.outputFormat(forBus: 0)
+        // Query the actual connection format so the buffer always matches.
+        let nodeFmt    = playerNode.outputFormat(forBus: 0)
         let sampleRate = nodeFmt.sampleRate
-        let symLen = Int(sampleRate / mode.toneSeparation)  // samples per symbol
-        let totalSamples = symbols.count * symLen
-        var wave = [Float](repeating: 0, count: totalSamples)
-        var phase: Double = 0
+        guard sampleRate > 0 else {
+            print("[AudioEngine] Invalid sample rate: \(sampleRate)")
+            return
+        }
 
+        let symLen       = Int(sampleRate / mode.toneSeparation)
+        let totalSamples = symbols.count * symLen
+        var wave  = [Float](repeating: 0, count: totalSamples)
+        var phase: Double = 0
         let baseFreq = 1_000.0   // base audio offset Hz
 
         for (i, sym) in symbols.enumerated() {
-            let freq = baseFreq + Double(sym) * mode.toneSeparation
+            let freq  = baseFreq + Double(sym) * mode.toneSeparation
             let start = i * symLen
             for j in 0 ..< symLen {
-                let t = Double(j) / sampleRate
-                wave[start + j] = Float(sin(2 * .pi * freq * t + phase))
+                wave[start + j] = Float(sin(2 * .pi * freq * Double(j) / sampleRate + phase))
             }
-            // maintain phase continuity across symbols
             phase += 2 * .pi * freq * Double(symLen) / sampleRate
         }
 
-        // Apply raised-cosine ramp to avoid key clicks (8-ms edges)
-        let rampLen = Int(sampleRate * 0.008)
+        // Raised-cosine ramp (8 ms) to avoid key clicks
+        let rampLen = max(1, Int(sampleRate * 0.008))
         for i in 0 ..< min(rampLen, wave.count) {
-            let t = Double(i) / Double(rampLen)
-            let env = Float(0.5 * (1 - cos(.pi * t)))
+            let env = Float(0.5 * (1 - cos(.pi * Double(i) / Double(rampLen))))
             wave[i] *= env
             wave[wave.count - 1 - i] *= env
         }
 
-        guard let buf = AVAudioPCMBuffer(pcmFormat: nodeFmt, frameCapacity: AVAudioFrameCount(wave.count))
-        else { return }
-
-        buf.frameLength = AVAudioFrameCount(wave.count)
-        // Fill all channels with the same mono waveform
+        guard let buf = AVAudioPCMBuffer(pcmFormat: nodeFmt,
+                                         frameCapacity: AVAudioFrameCount(totalSamples))
+        else {
+            print("[AudioEngine] Failed to create PCM buffer (fmt=\(nodeFmt), frames=\(totalSamples))")
+            return
+        }
+        buf.frameLength = AVAudioFrameCount(totalSamples)
         for ch in 0 ..< Int(nodeFmt.channelCount) {
-            buf.floatChannelData?[ch].update(from: wave, count: wave.count)
+            buf.floatChannelData?[ch].update(from: wave, count: totalSamples)
         }
 
-        guard engine.isRunning else { return }
+        print("[AudioEngine] Scheduling \(totalSamples) frames at \(sampleRate) Hz (\(nodeFmt.channelCount) ch)")
         if !playerNode.isPlaying { playerNode.play() }
-        playerNode.scheduleBuffer(buf) { [weak self] in
-            DispatchQueue.main.async { self?.playerNode.stop() }
+        playerNode.scheduleBuffer(buf, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+            self?.playerNode.stop()
+            completion?()
         }
     }
 

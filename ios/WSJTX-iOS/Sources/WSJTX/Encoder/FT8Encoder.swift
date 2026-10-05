@@ -42,8 +42,11 @@ public final class FT8Encoder {
         qsoStage: QSOStage
     ) -> String {
         let r = report.map { $0 >= 0 ? "+\($0)" : "\($0)" } ?? "+00"
+        let grid4 = String(myGrid.prefix(4))
         switch qsoStage {
-        case .calling:   return "CQ \(myCall) \(String(myGrid.prefix(4)))"
+        case .calling:
+            // Omit grid if not set; CQ with grid is preferred but not required
+            return grid4.isEmpty ? "CQ \(myCall)" : "CQ \(myCall) \(grid4)"
         case .answered:  return "\(dxCall) \(myCall) \(r)"
         case .report:    return "\(dxCall) \(myCall) R\(r)"
         case .rrr:       return "\(dxCall) \(myCall) RRR"
@@ -66,15 +69,20 @@ public final class FT8Encoder {
         return packFreeText(text: upper)
     }
 
-    // CQ <mycall> <grid4>
+    // CQ <mycall> [<grid4>] — grid is optional
     private func packCQ(parts: [String]) -> [Int]? {
-        guard parts.count >= 3 else { return nil }
+        guard parts.count >= 2 else { return nil }
         let callA = parts[1]
-        let grid  = parts[2]
-        guard let c28a = packCallsign(callA),
-              let g15  = packGrid(grid) else { return nil }
-        // c28b = special "CQ" code
-        let c28b = (1 << 28) - 2
+        guard let c28a = packCallsign(callA) else { return nil }
+        let c28b = (1 << 28) - 2  // special "CQ" code
+
+        // g15 = 0 means no grid; use grid if provided and valid
+        let g15: Int
+        if parts.count >= 3, let packed = packGrid(parts[2]) {
+            g15 = packed
+        } else {
+            g15 = 0
+        }
 
         var bits = [Int]()
         bits += int2bits(c28a, count: 28)

@@ -68,10 +68,25 @@ final class AppState: ObservableObject {
         audioEngine.stop()
     }
 
+    func stopTransmitting() {
+        audioEngine.stopTransmit()
+        transmitting = false
+    }
+
     func transmit(message: String) {
-        guard !settings.myCall.isEmpty else { return }
+        guard !settings.myCall.isEmpty else {
+            print("[TX] No callsign set — set your callsign in Settings first")
+            return
+        }
         let symbols = encoder.encode(message: message, mode: currentMode)
-        audioEngine.transmit(symbols: symbols, mode: currentMode)
+        guard !symbols.isEmpty else {
+            print("[TX] Encode failed for message: \(message)")
+            return
+        }
+        print("[TX] Transmitting \(symbols.count) symbols: \(message)")
+        audioEngine.transmit(symbols: symbols, mode: currentMode) { [weak self] in
+            DispatchQueue.main.async { self?.transmitting = false }
+        }
         transmitting = true
     }
 

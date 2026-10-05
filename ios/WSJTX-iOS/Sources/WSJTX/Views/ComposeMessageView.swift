@@ -111,8 +111,7 @@ public struct ComposeMessageView: View {
 
     private func transmit() {
         if app.transmitting {
-            app.transmitting = false
-            app.audioEngine.stop()
+            app.stopTransmitting()
         } else {
             let msg = useCustom ? customMessage : suggestedMessage
             app.txMessage = msg
