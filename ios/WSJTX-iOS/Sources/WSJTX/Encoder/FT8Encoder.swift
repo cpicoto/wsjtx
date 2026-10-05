@@ -54,13 +54,18 @@ public final class FT8Encoder {
         }
     }
 
-    // MARK: - 77-bit message packing
+    // MARK: - 77-bit message packing (internal helpers used by Q65Encoder)
+
+    /// Public entry point for Q65Encoder to reuse FT8's message packing.
+    public func pack77Public(message: String) -> [Int]? { pack77(message: message) }
+
+    /// Public entry point for Q65Encoder to reuse FT8's LDPC encoder.
+    public func ldpcEncodePublic(bits: [Int]) -> [Int] { ldpcEncode(bits: bits) }
 
     private func pack77(message: String) -> [Int]? {
         let upper = message.uppercased().trimmingCharacters(in: .whitespaces)
         let parts = upper.components(separatedBy: .whitespaces)
 
-        // Detect message type
         if parts.first == "CQ" {
             return packCQ(parts: parts)
         } else if parts.count >= 2 {

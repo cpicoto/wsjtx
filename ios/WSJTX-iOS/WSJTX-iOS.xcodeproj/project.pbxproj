@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		11C42673C85275363827E421 /* ComposeMessageView.swift in Sources */ = {isa = PBXBuildFile; fileRef = DB79A4B67D5C8D7DDDE29B25 /* ComposeMessageView.swift */; };
+		27323B24376F603F9BD46CE7 /* Q65Encoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 359BBA51C1E2D5AC804C4E0B /* Q65Encoder.swift */; };
 		35340BBE9A2131BE3C2AB67C /* FT8Encoder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9BDDD3B7B461A9A3C36B4BED /* FT8Encoder.swift */; };
 		3B6AA066BB3E9901B7018B14 /* SettingsView.swift in Sources */ = {isa = PBXBuildFile; fileRef = 793295A26B3885FECA0DC1CD /* SettingsView.swift */; };
 		4CD04FCDB0D850B38943C5F0 /* RigControl.swift in Sources */ = {isa = PBXBuildFile; fileRef = B2FB5C127261D99A48CA35E8 /* RigControl.swift */; };
@@ -37,6 +38,7 @@
 		19A0E3A14FCF9801CEFE4771 /* LogbookView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LogbookView.swift; sourceTree = "<group>"; };
 		19F336D8F7B14D9F8C98BCD1 /* FT8Protocol.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FT8Protocol.swift; sourceTree = "<group>"; };
 		29F3F0373B3A826D9A7CF2E2 /* WaterfallView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WaterfallView.swift; sourceTree = "<group>"; };
+		359BBA51C1E2D5AC804C4E0B /* Q65Encoder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Q65Encoder.swift; sourceTree = "<group>"; };
 		37E9E8690E0220C650FA93F4 /* Accelerate.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Accelerate.framework; path = System/Library/Frameworks/Accelerate.framework; sourceTree = SDKROOT; };
 		41B2578C28D777F7CA9EFD96 /* WSJTXApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WSJTXApp.swift; sourceTree = "<group>"; };
 		4EF2193329EDD23F22FC6A8A /* QSORecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = QSORecord.swift; sourceTree = "<group>"; };
@@ -158,6 +160,7 @@
 			isa = PBXGroup;
 			children = (
 				9BDDD3B7B461A9A3C36B4BED /* FT8Encoder.swift */,
+				359BBA51C1E2D5AC804C4E0B /* Q65Encoder.swift */,
 			);
 			path = Encoder;
 			sourceTree = "<group>";
@@ -270,6 +273,7 @@
 				677C8946A203F8D816D81BDE /* LogbookView.swift in Sources */,
 				FD3E107404AFD119A65EA1AC /* MainView.swift in Sources */,
 				AFEE7B58B7F0DE8A4B6B9BC3 /* MessageListView.swift in Sources */,
+				27323B24376F603F9BD46CE7 /* Q65Encoder.swift in Sources */,
 				752CB336BB9B2C3026B13AF4 /* QSORecord.swift in Sources */,
 				CFF2BDCA6761B6B806EA2404 /* RadioMode.swift in Sources */,
 				4CD04FCDB0D850B38943C5F0 /* RigControl.swift in Sources */,

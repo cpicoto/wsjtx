@@ -20,12 +20,14 @@ final class AppState: ObservableObject {
     @Published var audioEngine: AudioEngine
     @Published var decoder: FT8Decoder
     @Published var encoder: FT8Encoder
+    @Published var q65Encoder: Q65Encoder
     @Published var messages: [DecodedMessage] = []
     @Published var logbook: [QSORecord] = []
     @Published var currentBand: Band = .m20
     @Published var currentMode: RadioMode = .ft8
+    @Published var q65SubMode: Q65SubMode = .a
     @Published var transmitting = false
-    @Published var txError: String? = nil   // shown in UI when TX is blocked
+    @Published var txError: String? = nil
     @Published var dxCall = ""
     @Published var dxGrid = ""
     @Published var txMessage = ""
@@ -33,16 +35,18 @@ final class AppState: ObservableObject {
 
     init() {
         let settings = AppSettings()
-        let engine = AudioEngine()
-        let dec = FT8Decoder()
-        let enc = FT8Encoder(settings: settings)
-        let rig = RigControl(settings: settings)
+        let engine   = AudioEngine()
+        let dec      = FT8Decoder()
+        let enc      = FT8Encoder(settings: settings)
+        let q65      = Q65Encoder(settings: settings)
+        let rig      = RigControl(settings: settings)
 
-        self.settings = settings
+        self.settings    = settings
         self.audioEngine = engine
-        self.decoder = dec
-        self.encoder = enc
-        self.rigControl = rig
+        self.decoder     = dec
+        self.encoder     = enc
+        self.q65Encoder  = q65
+        self.rigControl  = rig
 
         wireDecoder(engine: engine, decoder: dec)
     }
@@ -79,20 +83,32 @@ final class AppState: ObservableObject {
             txError = "Set your callsign in Settings before transmitting."
             return
         }
-        // FT8 and FT4 have complete encoder support. Other modes use FT8's
-        // frame structure as a placeholder — flag this clearly.
-        guard currentMode == .ft8 || currentMode == .ft4 else {
-            txError = "\(currentMode.rawValue) transmit is not yet supported. Switch to FT8 or FT4."
+
+        let symbols: [Int]
+        switch currentMode {
+        case .ft8, .ft4:
+            let encoded = encoder.encode(message: message, mode: currentMode)
+            guard !encoded.isEmpty else {
+                txError = "Could not encode message: \(message)"
+                return
+            }
+            symbols = encoded
+
+        case .q65:
+            let encoded = q65Encoder.encode(message: message, subMode: q65SubMode)
+            guard !encoded.isEmpty else {
+                txError = "Could not encode Q65 message: \(message)"
+                return
+            }
+            symbols = encoded
+
+        default:
+            txError = "\(currentMode.rawValue) transmit is not yet supported. Use FT8, FT4, or Q65."
             return
         }
-        let symbols = encoder.encode(message: message, mode: currentMode)
-        guard !symbols.isEmpty else {
-            txError = "Could not encode message: \(message)"
-            print("[TX] Encode failed for: \(message)")
-            return
-        }
+
         txError = nil
-        print("[TX] Transmitting \(symbols.count) symbols: \(message)")
+        print("[TX] \(currentMode.rawValue) \(symbols.count) symbols: \(message)")
         audioEngine.transmit(symbols: symbols, mode: currentMode) { [weak self] in
             DispatchQueue.main.async { self?.transmitting = false }
         }
