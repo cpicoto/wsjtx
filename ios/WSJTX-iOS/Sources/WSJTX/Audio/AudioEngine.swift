@@ -42,17 +42,15 @@ public final class AudioEngine: ObservableObject {
         }
     }
 
-    private let txSampleRate: Double = 48_000  // hardware output rate for TX
-
     private func setupGraph() {
-        let input  = engine.inputNode
-        let rxFmt  = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
-        let txFmt  = AVAudioFormat(standardFormatWithSampleRate: txSampleRate, channels: 1)!
+        let input = engine.inputNode
+        let rxFmt = AVAudioFormat(standardFormatWithSampleRate: 48_000, channels: 1)!
 
         engine.attach(playerNode)
-        // Connect player node with the same explicit format used for TX buffers;
-        // mismatched formats are what caused the NSException / SIGABRT on transmit.
-        engine.connect(playerNode, to: engine.mainMixerNode, format: txFmt)
+        // Use format:nil so the engine auto-selects the hardware output format.
+        // The TX path queries playerNode.outputFormat(forBus:0) at transmit time
+        // to guarantee the buffer format always matches the actual connection format.
+        engine.connect(playerNode, to: engine.mainMixerNode, format: nil)
 
         // Down-sample tap: capture at 48 kHz, present 12 kHz to decoder
         input.installTap(onBus: 0, bufferSize: 4096, format: rxFmt) { [weak self] buf, _ in
@@ -87,9 +85,15 @@ public final class AudioEngine: ObservableObject {
     // MARK: - Transmit
 
     /// Converts FSK symbol indices to an audio waveform and plays it.
-    /// Synthesises at 48 kHz to match the playerNode's output connection format.
+    /// Queries the playerNode's actual output format after engine start so the
+    /// buffer format always matches the connection — fixing the SIGABRT crash
+    /// without breaking the input tap.
     public func transmit(symbols: [Int], mode: RadioMode) {
-        let sampleRate = txSampleRate  // 48 kHz — must match the playerNode connection format
+        guard engine.isRunning else { return }
+
+        // Use the format the engine actually assigned to the player node connection.
+        let nodeFmt   = playerNode.outputFormat(forBus: 0)
+        let sampleRate = nodeFmt.sampleRate
         let symLen = Int(sampleRate / mode.toneSeparation)  // samples per symbol
         let totalSamples = symbols.count * symLen
         var wave = [Float](repeating: 0, count: totalSamples)
@@ -117,13 +121,13 @@ public final class AudioEngine: ObservableObject {
             wave[wave.count - 1 - i] *= env
         }
 
-        guard let fmt = AVAudioFormat(standardFormatWithSampleRate: sampleRate, channels: 1),
-              let buf = AVAudioPCMBuffer(pcmFormat: fmt, frameCapacity: AVAudioFrameCount(wave.count))
+        guard let buf = AVAudioPCMBuffer(pcmFormat: nodeFmt, frameCapacity: AVAudioFrameCount(wave.count))
         else { return }
 
         buf.frameLength = AVAudioFrameCount(wave.count)
-        wave.withUnsafeBufferPointer { ptr in
-            buf.floatChannelData?[0].update(from: ptr.baseAddress!, count: wave.count)
+        // Fill all channels with the same mono waveform
+        for ch in 0 ..< Int(nodeFmt.channelCount) {
+            buf.floatChannelData?[ch].update(from: wave, count: wave.count)
         }
 
         guard engine.isRunning else { return }
