@@ -4,7 +4,8 @@ import UIKit
 // MARK: - Waterfall View
 
 /// Scrolling waterfall spectrogram rendered with a UIKit-backed `CALayer` for
-/// performance.  New FFT rows are prepended at the top; older rows scroll down.
+/// performance.  New FFT rows arrive via WaterfallData.onRow (direct callback,
+/// not @Published) so every frame is rendered even under rapid audio input.
 public struct WaterfallView: UIViewRepresentable {
 
     @ObservedObject var data: WaterfallData
@@ -13,9 +14,10 @@ public struct WaterfallView: UIViewRepresentable {
     public var fLow:  Float = 200
     public var fHigh: Float = 3000
 
-    // dB colour map limits
-    public var dbLow:  Float = -15
-    public var dbHigh: Float =  40
+    // dB colour map range.  With 2/fftSize normalisation a full-scale sine = 0 dB;
+    // typical phone mic noise floor is around −50 dB.
+    public var dbLow:  Float = -55
+    public var dbHigh: Float =  10
 
     public func makeUIView(context: Context) -> WaterfallUIView {
         let v = WaterfallUIView()
@@ -23,12 +25,16 @@ public struct WaterfallView: UIViewRepresentable {
         v.fHigh  = fHigh
         v.dbLow  = dbLow
         v.dbHigh = dbHigh
+        // Wire the direct callback so every frame is painted immediately on the main thread.
+        data.onRow = { [weak v] bins, freqAxis in
+            DispatchQueue.main.async { v?.pushRow(bins, freqAxis: freqAxis) }
+        }
         return v
     }
 
     public func updateUIView(_ uiView: WaterfallUIView, context: Context) {
-        guard let newest = data.rows.first else { return }
-        uiView.pushRow(newest, freqAxis: data.freqAxis)
+        uiView.dbLow  = dbLow
+        uiView.dbHigh = dbHigh
     }
 }
 

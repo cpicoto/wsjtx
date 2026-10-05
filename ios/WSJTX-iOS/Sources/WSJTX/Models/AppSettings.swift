@@ -56,8 +56,8 @@ public final class AppSettings: ObservableObject {
         }
     }
 
-    @AppStorage("waterfallLow")  public var waterfallLow  = -15.0  // dB
-    @AppStorage("waterfallHigh") public var waterfallHigh =  35.0  // dB
+    @AppStorage("waterfallLow")  public var waterfallLow  = -55.0  // dB (noise floor for phone mic)
+    @AppStorage("waterfallHigh") public var waterfallHigh =  10.0  // dB (just above full-scale)
 
     // MARK: PSK Reporter
     @AppStorage("pskReporter")   public var pskReporterEnabled = false

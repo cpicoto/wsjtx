@@ -52,7 +52,9 @@ struct WaterfallTabView: View {
                 BandModeBar()
 
                 // ── Waterfall ───────────────────────────────────────────
-                WaterfallView(data: waterfall)
+                WaterfallView(data: waterfall,
+                              dbLow: Float(app.settings.waterfallLow),
+                              dbHigh: Float(app.settings.waterfallHigh))
                     .frame(maxWidth: .infinity)
                     .frame(height: 280)
 

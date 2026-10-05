@@ -9,14 +9,14 @@ public final class FFTProcessor {
 
     // MARK: Types
     public struct Frame {
-        public let bins: [Float]     // linear magnitude, length == fftSize/2
-        public let centerFreqs: [Float]  // Hz for each bin
+        public let bins: [Float]        // dB magnitude, length == fftSize/2
+        public let centerFreqs: [Float] // Hz for each bin
         public let sampleRate: Double
     }
 
     // MARK: Configuration
     public let fftSize: Int
-    public let overlap: Int          // in samples (default 50 %)
+    public let overlap: Int
     public let sampleRate: Double
 
     public var onFrame: ((Frame) -> Void)?
@@ -26,18 +26,26 @@ public final class FFTProcessor {
     private let log2n: vDSP_Length
     private var window: [Float]
     private var accumulator: [Float] = []
+    private let freqs: [Float]
+    // Normalisation: 2/(fftSize) gives 0 dB for full-scale input sine
+    private let normScale: Float
 
     public init(fftSize: Int = 2048, overlap: Int = 1024, sampleRate: Double = 12_000) {
-        self.fftSize   = fftSize
-        self.overlap   = overlap
+        self.fftSize    = fftSize
+        self.overlap    = overlap
         self.sampleRate = sampleRate
-        self.log2n = vDSP_Length(log2(Double(fftSize)))
-        self.fftSetup  = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2))!
+        self.log2n      = vDSP_Length(log2(Double(fftSize)))
+        self.fftSetup   = vDSP_create_fftsetup(log2n, FFTRadix(kFFTRadix2))!
+        self.normScale  = 2.0 / Float(fftSize)
 
         // Hann window
         var w = [Float](repeating: 0, count: fftSize)
         vDSP_hann_window(&w, vDSP_Length(fftSize), Int32(vDSP_HANN_NORM))
         self.window = w
+
+        // Pre-compute frequency axis (Hz per bin)
+        let binHz = Float(sampleRate) / Float(fftSize)
+        self.freqs = (0 ..< fftSize / 2).map { Float($0) * binHz }
     }
 
     deinit { vDSP_destroy_fftsetup(fftSetup) }
@@ -46,7 +54,6 @@ public final class FFTProcessor {
 
     public func process(samples: [Float]) {
         accumulator.append(contentsOf: samples)
-
         let hop = fftSize - overlap
         while accumulator.count >= fftSize {
             let slice = Array(accumulator.prefix(fftSize))
@@ -62,44 +69,54 @@ public final class FFTProcessor {
         var windowed = [Float](repeating: 0, count: fftSize)
         vDSP_vmul(samples, 1, window, 1, &windowed, 1, vDSP_Length(fftSize))
 
-        // Pack into DSPSplitComplex
-        var realPart = [Float](repeating: 0, count: fftSize / 2)
-        var imagPart = [Float](repeating: 0, count: fftSize / 2)
-        var splitComplex = DSPSplitComplex(realp: &realPart, imagp: &imagPart)
-
-        windowed.withUnsafeBytes { ptr in
-            let typedPtr = ptr.bindMemory(to: DSPComplex.self)
-            vDSP_ctoz(typedPtr.baseAddress!, 2, &splitComplex, 1, vDSP_Length(fftSize / 2))
+        // Pack real data into split complex for vDSP_fft_zrip.
+        // Stride 2 is the canonical Apple pattern: treats the float array as
+        // interleaved complex by taking pairs (even→real, odd→imaginary).
+        realPart.withUnsafeMutableBufferPointer { rp in
+            imagPart.withUnsafeMutableBufferPointer { ip in
+                var sc = DSPSplitComplex(realp: rp.baseAddress!, imagp: ip.baseAddress!)
+                windowed.withUnsafeBytes { raw in
+                    vDSP_ctoz(raw.bindMemory(to: DSPComplex.self).baseAddress!, 2,
+                              &sc, 1, vDSP_Length(fftSize / 2))
+                }
+                vDSP_fft_zrip(fftSetup, &sc, 1, log2n, FFTDirection(FFT_FORWARD))
+                vDSP_zvabs(&sc, 1, &magnitudes, 1, vDSP_Length(fftSize / 2))
+            }
         }
 
-        vDSP_fft_zrip(fftSetup, &splitComplex, 1, log2n, FFTDirection(FFT_FORWARD))
+        // Normalise to 0 dB for a full-scale sine, then convert to dB
+        vDSP_vsmul(magnitudes, 1, [normScale], &magnitudes, 1, vDSP_Length(fftSize / 2))
+        var dbBins = [Float](repeating: 0, count: fftSize / 2)
+        var eps: Float = 1e-10
+        vDSP_vsadd(magnitudes, 1, &eps, &dbBins, 1, vDSP_Length(fftSize / 2))
+        // vDSP_vdbcon flag 0: out[i] = B * 20 * log10(in[i]), B=1 → 20*log10
+        vDSP_vdbcon(dbBins, 1, [Float(1)], &dbBins, 1, vDSP_Length(fftSize / 2), 0)
 
-        // Compute magnitude spectrum (linear)
-        var magnitudes = [Float](repeating: 0, count: fftSize / 2)
-        vDSP_zvabs(&splitComplex, 1, &magnitudes, 1, vDSP_Length(fftSize / 2))
-
-        // Normalise
-        var scale = Float(1.0 / Float(fftSize))
-        vDSP_vsmul(magnitudes, 1, &scale, &magnitudes, 1, vDSP_Length(fftSize / 2))
-
-        // Build center-frequency array
-        let binHz = Float(sampleRate) / Float(fftSize)
-        let freqs = (0 ..< fftSize / 2).map { Float($0) * binHz }
-
-        let frame = Frame(bins: magnitudes, centerFreqs: freqs, sampleRate: sampleRate)
+        let frame = Frame(bins: dbBins, centerFreqs: freqs, sampleRate: sampleRate)
         onFrame?(frame)
     }
+
+    // Pre-allocated work buffers (avoids per-frame heap allocation)
+    private lazy var realPart   = [Float](repeating: 0, count: fftSize / 2)
+    private lazy var imagPart   = [Float](repeating: 0, count: fftSize / 2)
+    private lazy var magnitudes = [Float](repeating: 0, count: fftSize / 2)
 }
 
 // MARK: - Waterfall Data
 
-/// Ring buffer of FFT frames for the scrolling waterfall display.
+/// Accumulates FFT frames and delivers them to the waterfall UI via a direct
+/// callback (not @Published) so no frames are dropped when SwiftUI coalesces
+/// updates.
 public final class WaterfallData: ObservableObject {
     public let maxRows: Int
     public let binCount: Int
 
-    @Published public private(set) var rows: [[Float]] = []  // newest first
-    @Published public private(set) var freqAxis: [Float]  = []
+    // Snapshot used only for initial layout; the waterfall UIView is driven
+    // by onRow directly so it never misses a frame.
+    @Published public private(set) var freqAxis: [Float] = []
+
+    // Direct per-frame callback → WaterfallUIView.pushRow
+    public var onRow: (([Float], [Float]) -> Void)?
 
     private let fft: FFTProcessor
 
@@ -110,28 +127,16 @@ public final class WaterfallData: ObservableObject {
 
         fft.onFrame = { [weak self] frame in
             guard let self else { return }
-            let dBrow = Self.toDecibels(frame.bins)
-            DispatchQueue.main.async {
-                if self.freqAxis.isEmpty { self.freqAxis = frame.centerFreqs }
-                self.rows.insert(dBrow, at: 0)
-                if self.rows.count > maxRows { self.rows.removeLast() }
+            if self.freqAxis.isEmpty {
+                DispatchQueue.main.async { self.freqAxis = frame.centerFreqs }
             }
+            // Deliver directly on the calling (audio) thread; WaterfallUIView
+            // marshals to the main thread internally.
+            self.onRow?(frame.bins, frame.centerFreqs)
         }
     }
 
     public func ingest(samples: [Float]) {
         fft.process(samples: samples)
-    }
-
-    // MARK: - Helpers
-
-    private static func toDecibels(_ linear: [Float]) -> [Float] {
-        var db = [Float](repeating: 0, count: linear.count)
-        var count = Int32(linear.count)
-        // vDSP_vdbcon: db[i] = 20 * log10(linear[i] + eps)
-        var eps: Float = 1e-12
-        vDSP_vsadd(linear, 1, &eps, &db, 1, vDSP_Length(linear.count))
-        vDSP_vdbcon(db, 1, [Float(1)], &db, 1, vDSP_Length(linear.count), 0)
-        return db
     }
 }
