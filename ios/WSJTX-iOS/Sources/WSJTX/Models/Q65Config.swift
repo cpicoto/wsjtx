@@ -1,6 +1,55 @@
 import Foundation
 import Combine
 
+// MARK: - TX Slot
+
+/// Which half of the period pair this station transmits in.
+/// Applies to ALL WSJT-X modes; mirrors the WSJT-X "1st / 2nd" toggle.
+public enum TxSlot: String, CaseIterable, Identifiable, Codable {
+    case first  = "1st"
+    case second = "2nd"
+
+    public var id: String { rawValue }
+
+    /// Returns true when the current UTC time falls in this station's TX slot.
+    public func isMyTurn(cycleSeconds: Int) -> Bool {
+        let t    = Int(Date().timeIntervalSince1970)
+        let slot = (t / cycleSeconds) % 2  // 0 = even, 1 = odd
+        return self == .first ? slot == 0 : slot == 1
+    }
+}
+
+// MARK: - Operating Config (all modes)
+
+/// Mode-independent operating parameters shown for every mode:
+/// audio RX/TX frequency and 1st/2nd TX slot.
+public final class OperatingConfig: ObservableObject {
+
+    /// Audio receive frequency (Hz) — green marker on waterfall.
+    @Published public var rxFreq: Int = 1_000
+
+    /// Audio transmit frequency (Hz) — red marker.
+    @Published public var txFreq: Int = 1_000
+
+    /// When true, TX frequency tracks RX frequency.
+    @Published public var freqLocked: Bool = true
+
+    /// Whether this station transmits in the first or second slot.
+    @Published public var txSlot: TxSlot = .first
+
+    public init() {}
+
+    public func setRxFreq(_ hz: Int) {
+        rxFreq = hz
+        if freqLocked { txFreq = hz }
+    }
+
+    public func setTxFreq(_ hz: Int) {
+        txFreq = hz
+        if freqLocked { rxFreq = hz }
+    }
+}
+
 // MARK: - Q65 Period
 
 /// T/R sequence length in seconds.
@@ -12,7 +61,6 @@ public enum Q65Period: Int, CaseIterable, Identifiable, Codable {
     case p300 = 300
 
     public var id: Int { rawValue }
-
     public var label: String { "\(rawValue)s" }
 
     /// Recommended band/use-case hint.
@@ -27,70 +75,21 @@ public enum Q65Period: Int, CaseIterable, Identifiable, Codable {
     }
 }
 
-// MARK: - Q65 TX Slot
+// Typealias kept for source compatibility in Q65ConfigView.
+public typealias Q65TxSlot = TxSlot
 
-/// Which half of the period pair this station transmits in.
-/// Mirrors the WSJT-X "1st / 2nd" toggle.
-public enum Q65TxSlot: String, CaseIterable, Identifiable, Codable {
-    case first  = "1st"
-    case second = "2nd"
+// MARK: - Q65 Config (Q65-specific extras)
 
-    public var id: String { rawValue }
-
-    /// Returns true when the current UTC time falls in this station's TX slot.
-    public func isMyTurn(period: Q65Period) -> Bool {
-        let t = Int(Date().timeIntervalSince1970)
-        let slot = (t / period.rawValue) % 2  // 0 = even, 1 = odd
-        return self == .first ? slot == 0 : slot == 1
-    }
-}
-
-// MARK: - Q65 Config
-
-/// All Q65-specific operating parameters, mirroring the WSJT-X desktop controls.
+/// Q65-only parameters: sub-mode and period.
+/// RX/TX freq and slot are now in OperatingConfig (shared by all modes).
 public final class Q65Config: ObservableObject {
 
-    /// Tone-spacing sub-mode (A = widest, E = narrowest).
     @Published public var subMode: Q65SubMode = .a
+    @Published public var period:  Q65Period  = .p60
 
-    /// T/R sequence length.
-    @Published public var period: Q65Period = .p60
-
-    /// Audio receive frequency (Hz) — yellow marker on waterfall.
-    /// Signals within ±tolerance of rxFreq are decoded.
-    @Published public var rxFreq: Int = 1_000
-
-    /// Audio transmit frequency (Hz) — red marker while TX is active.
-    /// May differ from rxFreq for split/Doppler-corrected operation.
-    @Published public var txFreq: Int = 1_000
-
-    /// Whether TX and RX frequencies are locked together.
-    @Published public var freqLocked: Bool = true
-
-    /// TX slot within the period pair.
-    @Published public var txSlot: Q65TxSlot = .first
-
-    /// Shorthand for the current mode label, e.g. "Q65-60A".
     public var modeLabel: String { "Q65-\(period.rawValue)\(subMode.rawValue)" }
-
-    /// Returns the tone separation for the current sub-mode.
     public var toneSeparation: Double { subMode.toneSeparation }
+    public var cycleLength: Double    { Double(period.rawValue) }
 
-    /// Returns the cycle length for the current period (as Double, for RadioMode compat).
-    public var cycleLength: Double { Double(period.rawValue) }
-
-    // Keep RX and TX in sync when locked
-    public init() {
-        // Observe rxFreq changes and mirror to txFreq when locked
-    }
-
-    public func setRxFreq(_ hz: Int) {
-        rxFreq = hz
-        if freqLocked { txFreq = hz }
-    }
-
-    public func setTxFreq(_ hz: Int) {
-        txFreq = hz
-        if freqLocked { rxFreq = hz }
-    }
+    public init() {}
 }

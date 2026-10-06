@@ -16,23 +16,23 @@ struct WSJTXApp: App {
 /// Top-level application state shared across all views.
 @MainActor
 final class AppState: ObservableObject {
-    @Published var settings = AppSettings()
-    @Published var audioEngine: AudioEngine
-    @Published var decoder: FT8Decoder
-    @Published var encoder: FT8Encoder
-    @Published var q65Encoder: Q65Encoder
-    @Published var q65Config  = Q65Config()
-    @Published var messages: [DecodedMessage] = []
-    @Published var logbook: [QSORecord] = []
-    @Published var currentBand: Band = .m20
-    @Published var currentMode: RadioMode = .ft8
-    @Published var q65SubMode: Q65SubMode = .a
-    @Published var transmitting = false
-    @Published var txError: String? = nil
-    @Published var dxCall = ""
-    @Published var dxGrid = ""
-    @Published var txMessage = ""
-    @Published var rigControl: RigControl
+    @Published var settings       = AppSettings()
+    @Published var audioEngine:     AudioEngine
+    @Published var decoder:         FT8Decoder
+    @Published var encoder:         FT8Encoder
+    @Published var q65Encoder:      Q65Encoder
+    @Published var opConfig        = OperatingConfig()  // RX/TX freq + slot — all modes
+    @Published var q65Config       = Q65Config()         // Q65 sub-mode + period
+    @Published var messages:       [DecodedMessage] = []
+    @Published var logbook:        [QSORecord]      = []
+    @Published var currentBand:     Band            = .m20
+    @Published var currentMode:     RadioMode       = .ft8
+    @Published var transmitting     = false
+    @Published var txError:        String?          = nil
+    @Published var dxCall           = ""
+    @Published var dxGrid           = ""
+    @Published var txMessage        = ""
+    @Published var rigControl:      RigControl
 
     init() {
         let settings = AppSettings()
@@ -66,13 +66,8 @@ final class AppState: ObservableObject {
         }
     }
 
-    func startListening() {
-        audioEngine.start()
-    }
-
-    func stopListening() {
-        audioEngine.stop()
-    }
+    func startListening() { audioEngine.start() }
+    func stopListening()  { audioEngine.stop()  }
 
     func stopTransmitting() {
         audioEngine.stopTransmit()
@@ -89,29 +84,23 @@ final class AppState: ObservableObject {
         switch currentMode {
         case .ft8, .ft4:
             let encoded = encoder.encode(message: message, mode: currentMode)
-            guard !encoded.isEmpty else {
-                txError = "Could not encode message: \(message)"
-                return
-            }
+            guard !encoded.isEmpty else { txError = "Could not encode: \(message)"; return }
             symbols = encoded
 
         case .q65:
             let encoded = q65Encoder.encode(message: message, subMode: q65Config.subMode)
-            guard !encoded.isEmpty else {
-                txError = "Could not encode Q65 message: \(message)"
-                return
-            }
+            guard !encoded.isEmpty else { txError = "Could not encode Q65: \(message)"; return }
             symbols = encoded
 
         default:
-            txError = "\(currentMode.rawValue) transmit is not yet supported. Use FT8, FT4, or Q65."
+            txError = "\(currentMode.rawValue) TX not yet supported. Use FT8, FT4, or Q65."
             return
         }
 
         txError = nil
-        let txFreq = currentMode == .q65 ? Double(q65Config.txFreq) : 1_000.0
-        print("[TX] \(currentMode.rawValue) \(symbols.count) symbols @ \(Int(txFreq))Hz: \(message)")
-        audioEngine.transmit(symbols: symbols, mode: currentMode, baseFreq: txFreq) { [weak self] in
+        let txHz = Double(opConfig.txFreq)
+        print("[TX] \(currentMode.rawValue) \(symbols.count) symbols @ \(Int(txHz))Hz: \(message)")
+        audioEngine.transmit(symbols: symbols, mode: currentMode, baseFreq: txHz) { [weak self] in
             DispatchQueue.main.async { self?.transmitting = false }
         }
         transmitting = true

@@ -48,28 +48,34 @@ struct WaterfallTabView: View {
     var body: some View {
         NavigationStack {
             VStack(spacing: 0) {
-                // ── Band / Mode / Frequency bar ─────────────────────────
+                // ── Band / Mode bar ──────────────────────────────────────
                 BandModeBar()
 
-                // ── Q65 config strip (only in Q65 mode) ─────────────────
+                // ── Config strip — visible for ALL modes ─────────────────
                 if app.currentMode == .q65 {
-                    Q65ConfigPanel(config: app.q65Config)
-                    Divider()
+                    // Q65: FreqSlotBar is embedded inside Q65ConfigPanel
+                    Q65ConfigPanel(config: app.q65Config, op: app.opConfig)
+                } else {
+                    // Every other mode gets the compact freq + slot strip
+                    FreqSlotBar(op: app.opConfig,
+                                cycleSeconds: Int(app.currentMode.cycleLength))
                 }
-
-                // ── Waterfall ───────────────────────────────────────────
-                WaterfallView(data: waterfall,
-                              dbLow:        Float(app.settings.waterfallLow),
-                              dbHigh:       Float(app.settings.waterfallHigh),
-                              rxFreq:       app.currentMode == .q65 ? app.q65Config.rxFreq : 1_000,
-                              txFreq:       app.currentMode == .q65 ? app.q65Config.txFreq : 1_000,
-                              transmitting: app.transmitting)
-                    .frame(maxWidth: .infinity)
-                    .frame(height: app.currentMode == .q65 ? 220 : 280)
 
                 Divider()
 
-                // ── Cycle timer ─────────────────────────────────────────
+                // ── Waterfall ─────────────────────────────────────────────
+                WaterfallView(data: waterfall,
+                              dbLow:        Float(app.settings.waterfallLow),
+                              dbHigh:       Float(app.settings.waterfallHigh),
+                              rxFreq:       app.opConfig.rxFreq,
+                              txFreq:       app.opConfig.txFreq,
+                              transmitting: app.transmitting)
+                    .frame(maxWidth: .infinity)
+                    .frame(height: app.currentMode == .q65 ? 200 : 260)
+
+                Divider()
+
+                // ── Cycle timer ───────────────────────────────────────────
                 HStack {
                     CycleTimerView(
                         secondsRemaining: $secondsRemaining,
@@ -85,7 +91,7 @@ struct WaterfallTabView: View {
 
                 Divider()
 
-                // ── Quick TX panel ──────────────────────────────────────
+                // ── Quick TX panel ────────────────────────────────────────
                 QuickTXPanel()
             }
             .navigationTitle("WSJT-X")
@@ -99,8 +105,6 @@ struct WaterfallTabView: View {
             }
         }
         .onAppear {
-            // Feed samples to both the waterfall display and the FT8 decoder.
-            // (Replaces the decoder-only wire set in AppState.init.)
             app.audioEngine.onSampleBuffer = { [weak app] samples, rate in
                 waterfall.ingest(samples: samples)
                 app?.decoder.ingest(samples: samples, sampleRate: rate)
