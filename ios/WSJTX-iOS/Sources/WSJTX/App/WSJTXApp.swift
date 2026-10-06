@@ -1,4 +1,5 @@
 import SwiftUI
+import Combine
 
 @main
 struct WSJTXApp: App {
@@ -21,18 +22,28 @@ final class AppState: ObservableObject {
     @Published var decoder:         FT8Decoder
     @Published var encoder:         FT8Encoder
     @Published var q65Encoder:      Q65Encoder
-    @Published var opConfig        = OperatingConfig()  // RX/TX freq + slot — all modes
-    @Published var q65Config       = Q65Config()         // Q65 sub-mode + period
+    @Published var opConfig        = OperatingConfig()
+    @Published var q65Config       = Q65Config()
     @Published var messages:       [DecodedMessage] = []
     @Published var logbook:        [QSORecord]      = []
     @Published var currentBand:     Band            = .m20
-    @Published var currentMode:     RadioMode       = .ft8
+    @Published var currentMode:     RadioMode       = .ft8 {
+        didSet { currentPeriodSeconds = currentMode == .q65
+            ? q65Config.period.rawValue
+            : Int(currentMode.cycleLength) }
+    }
+    /// The effective T/R period in seconds — reflects mode and Q65 period setting.
+    /// Publishing this here (rather than reading q65Config.period from a nested
+    /// ObservableObject) ensures WaterfallTabView re-renders when period changes.
+    @Published var currentPeriodSeconds: Int        = 15
     @Published var transmitting     = false
     @Published var txError:        String?          = nil
     @Published var dxCall           = ""
     @Published var dxGrid           = ""
     @Published var txMessage        = ""
     @Published var rigControl:      RigControl
+
+    private var q65Cancellable: AnyCancellable?
 
     init() {
         let settings = AppSettings()
@@ -50,6 +61,17 @@ final class AppState: ObservableObject {
         self.rigControl  = rig
 
         wireDecoder(engine: engine, decoder: dec)
+
+        // Propagate q65Config.period changes into currentPeriodSeconds so that
+        // WaterfallTabView (which observes AppState, not Q65Config) re-renders.
+        q65Cancellable = q65Config.objectWillChange.sink { [weak self] _ in
+            guard let self else { return }
+            Task { @MainActor in
+                if self.currentMode == .q65 {
+                    self.currentPeriodSeconds = self.q65Config.period.rawValue
+                }
+            }
+        }
     }
 
     private func wireDecoder(engine: AudioEngine, decoder: FT8Decoder) {

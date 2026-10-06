@@ -70,9 +70,7 @@ struct WaterfallTabView: View {
                               rxFreq:        app.opConfig.rxFreq,
                               txFreq:        app.opConfig.txFreq,
                               transmitting:  app.transmitting,
-                              periodSeconds: app.currentMode == .q65
-                                  ? app.q65Config.period.rawValue
-                                  : Int(app.currentMode.cycleLength))
+                              periodSeconds: app.currentPeriodSeconds)
                     .frame(maxWidth: .infinity)
                     .frame(height: app.currentMode == .q65 ? 200 : 260)
 
@@ -82,9 +80,7 @@ struct WaterfallTabView: View {
                 HStack {
                     CycleTimerView(
                         secondsRemaining: $secondsRemaining,
-                        cycleLength: app.currentMode == .q65
-                            ? app.q65Config.period.rawValue
-                            : Int(app.currentMode.cycleLength)
+                        cycleLength: app.currentPeriodSeconds
                     )
                     Spacer()
                     LevelMeter(engine: app.audioEngine)
@@ -122,9 +118,7 @@ struct WaterfallTabView: View {
         cycleTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak app] _ in
             guard let app else { return }
             let now   = Int(Date().timeIntervalSince1970)
-            let cycle = app.currentMode == .q65
-                ? app.q65Config.period.rawValue
-                : Int(app.currentMode.cycleLength)
+            let cycle = app.currentPeriodSeconds
             secondsRemaining = cycle - (now % cycle)
         }
     }
