@@ -16,10 +16,18 @@ public final class AudioEngine: ObservableObject {
     public var onSampleBuffer: (([Float], Double) -> Void)?
 
     // MARK: Private
-    private let engine       = AVAudioEngine()
-    private let processingQ  = DispatchQueue(label: "wsjtx.audio", qos: .userInitiated)
-    private var playerNode   = AVAudioPlayerNode()
-    private let targetRate: Double = 12_000    // WSJT-X standard
+    private let engine      = AVAudioEngine()
+    /// Serial queue used exclusively for all AVAudioPlayerNode calls.
+    /// Serialising ALL playerNode access (play/scheduleBuffer/stop) onto one
+    /// queue is the only way to avoid AVAudioPlayerNode's internal semaphore
+    /// deadlock that occurs when stop() is called concurrently from two threads.
+    private let playerQ     = DispatchQueue(label: "wsjtx.player", qos: .userInitiated)
+    private let processingQ = DispatchQueue(label: "wsjtx.audio",  qos: .userInitiated)
+    private var playerNode  = AVAudioPlayerNode()
+    private let targetRate: Double = 12_000
+
+    /// Set to true to abort the current synthesis + playback at the next opportunity.
+    private var cancelTX = false
 
     // MARK: - Setup
 
@@ -86,7 +94,12 @@ public final class AudioEngine: ObservableObject {
     }
 
     public func stopTransmit() {
-        playerNode.stop()
+        // Set the cancellation flag so any in-progress synthesis bails early.
+        processingQ.async { [weak self] in self?.cancelTX = true }
+        // Stop the player node — serialised through playerQ to avoid the
+        // semaphore deadlock: completion callback and stopTransmit() both
+        // calling playerNode.stop() concurrently was the hang.
+        playerQ.async { [weak self] in self?.playerNode.stop() }
     }
 
     // MARK: - Transmit
@@ -119,13 +132,22 @@ public final class AudioEngine: ObservableObject {
         processingQ.async { [weak self] in
             guard let self else { return }
 
+            // Reset the cancellation flag for this new transmission.
+            self.cancelTX = false
+
             let symLen       = Int(sampleRate / mode.toneSeparation)
             let totalSamples = symbols.count * symLen
             var wave  = [Float](repeating: 0, count: totalSamples)
             var phase: Double = 0
-            // Use caller-specified base frequency (RX/TX freq from Q65Config or default 1000 Hz)
 
             for (i, sym) in symbols.enumerated() {
+                // Check cancellation at each symbol boundary (cheap; no lock needed
+                // since only processingQ writes cancelTX before we read it here).
+                if self.cancelTX {
+                    print("[AudioEngine] TX cancelled during synthesis")
+                    completion?()
+                    return
+                }
                 let freq  = baseFreq + Double(sym) * mode.toneSeparation
                 let start = i * symLen
                 for j in 0 ..< symLen {
@@ -134,7 +156,9 @@ public final class AudioEngine: ObservableObject {
                 phase += 2 * .pi * freq * Double(symLen) / sampleRate
             }
 
-            // Raised-cosine ramp (8 ms) — avoids key clicks / transient splatter
+            if self.cancelTX { completion?(); return }
+
+            // Raised-cosine ramp (8 ms) — avoids key clicks
             let rampLen = max(1, Int(sampleRate * 0.008))
             for i in 0 ..< min(rampLen, wave.count) {
                 let env = Float(0.5 * (1 - cos(.pi * Double(i) / Double(rampLen))))
@@ -153,11 +177,19 @@ public final class AudioEngine: ObservableObject {
                 buf.floatChannelData?[ch].update(from: wave, count: totalSamples)
             }
 
-            print("[AudioEngine] Scheduling \(totalSamples) frames at \(sampleRate) Hz (\(nodeFmt.channelCount) ch)")
-            if !self.playerNode.isPlaying { self.playerNode.play() }
-            self.playerNode.scheduleBuffer(buf, completionCallbackType: .dataPlayedBack) { [weak self] _ in
-                self?.playerNode.stop()
-                completion?()
+            // All playerNode calls go through playerQ — the ONLY way to prevent
+            // concurrent stop() calls from deadlocking via AVFoundation's internal
+            // semaphore (CancelTimer ↔ StopImpl).
+            self.playerQ.async { [weak self] in
+                guard let self, !self.cancelTX else { completion?(); return }
+                print("[AudioEngine] Scheduling \(totalSamples) frames @ \(Int(sampleRate)) Hz")
+                if !self.playerNode.isPlaying { self.playerNode.play() }
+                self.playerNode.scheduleBuffer(buf, completionCallbackType: .dataPlayedBack) { [weak self] _ in
+                    // Do NOT call playerNode.stop() here — that causes the deadlock.
+                    // Simply notify the caller; the player naturally becomes idle.
+                    self?.cancelTX = false
+                    completion?()
+                }
             }
         }
     }
