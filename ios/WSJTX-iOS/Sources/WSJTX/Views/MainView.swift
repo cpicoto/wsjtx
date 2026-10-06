@@ -133,18 +133,18 @@ struct BandModeBar: View {
     @EnvironmentObject private var app: AppState
 
     var body: some View {
-        HStack(spacing: 12) {
+        HStack(spacing: 8) {
             Picker("Band", selection: $app.currentBand) {
                 ForEach(Band.allCases) { b in Text(b.rawValue).tag(b) }
             }
             .pickerStyle(.menu)
-            .frame(width: 90)
+            .fixedSize()   // expand to fit the widest current label, no wrapping
 
             Picker("Mode", selection: $app.currentMode) {
                 ForEach(RadioMode.allCases) { m in Text(m.rawValue).tag(m) }
             }
             .pickerStyle(.menu)
-            .frame(width: 80)
+            .fixedSize()
 
             Spacer()
 
