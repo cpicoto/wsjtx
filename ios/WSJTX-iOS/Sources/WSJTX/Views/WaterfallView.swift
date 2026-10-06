@@ -3,7 +3,7 @@ import UIKit
 
 // MARK: - Waterfall View
 
-/// Scrolling waterfall spectrogram with RX (green) and TX (red) frequency markers.
+/// Scrolling waterfall spectrogram with RX/TX frequency markers and period boundary lines.
 public struct WaterfallView: UIViewRepresentable {
 
     @ObservedObject var data: WaterfallData
@@ -13,19 +13,20 @@ public struct WaterfallView: UIViewRepresentable {
     public var dbLow:  Float = -55
     public var dbHigh: Float =  10
 
-    /// Audio frequency of the receive window (Hz) — green marker.
     public var rxFreq: Int = 1_000
-    /// Audio frequency of the transmit carrier (Hz) — red marker.
     public var txFreq: Int = 1_000
-    /// Show the TX marker in red (true when transmitting).
     public var transmitting: Bool = false
+
+    /// T/R period in seconds — drives the horizontal period boundary lines.
+    public var periodSeconds: Int = 15
 
     public func makeUIView(context: Context) -> WaterfallUIView {
         let v = WaterfallUIView()
-        v.fLow   = fLow
-        v.fHigh  = fHigh
-        v.dbLow  = dbLow
-        v.dbHigh = dbHigh
+        v.fLow          = fLow
+        v.fHigh         = fHigh
+        v.dbLow         = dbLow
+        v.dbHigh        = dbHigh
+        v.periodSeconds = periodSeconds
         data.onRow = { [weak v] bins, freqAxis in
             DispatchQueue.main.async { v?.pushRow(bins, freqAxis: freqAxis) }
         }
@@ -33,12 +34,12 @@ public struct WaterfallView: UIViewRepresentable {
     }
 
     public func updateUIView(_ uiView: WaterfallUIView, context: Context) {
-        uiView.dbLow       = dbLow
-        uiView.dbHigh      = dbHigh
-        uiView.rxFreq      = Float(rxFreq)
-        uiView.txFreq      = Float(txFreq)
-        uiView.transmitting = transmitting
-        uiView.setNeedsDisplay()
+        uiView.dbLow         = dbLow
+        uiView.dbHigh        = dbHigh
+        uiView.rxFreq        = Float(rxFreq)
+        uiView.txFreq        = Float(txFreq)
+        uiView.transmitting  = transmitting
+        uiView.periodSeconds = periodSeconds
     }
 }
 
@@ -52,15 +53,24 @@ public final class WaterfallUIView: UIView {
     public var dbHigh: Float =  10
 
     // RX/TX frequency markers
-    public var rxFreq:      Float = 1_000
-    public var txFreq:      Float = 1_000
-    public var transmitting: Bool = false
+    public var rxFreq:       Float = 1_000
+    public var txFreq:       Float = 1_000
+    public var transmitting: Bool  = false
+
+    /// T/R period length in seconds for the horizontal period lines.
+    public var periodSeconds: Int = 15 {
+        didSet { periodOverlay.periodRows = rowsPerPeriod }
+    }
 
     private let pixelRowHeight: Int = 2
-    private var imageBuffer: UIImage?
+    /// Number of FFT rows (at 12 kHz, hop=1024) per T/R period.
+    private var rowsPerPeriod: Int { max(1, periodSeconds * 12_000 / 1_024) }
+
+    private var imageBuffer:  UIImage?
     private let imageView      = UIImageView()
     private let freqOverlay    = FrequencyAxisOverlay()
     private let markerOverlay  = FreqMarkerOverlay()
+    private let periodOverlay  = PeriodLineOverlay()
 
     public var onFrequencySelected: ((Float) -> Void)?
 
@@ -76,10 +86,12 @@ public final class WaterfallUIView: UIView {
         freqOverlay.translatesAutoresizingMaskIntoConstraints = false
         addSubview(freqOverlay)
 
-        markerOverlay.translatesAutoresizingMaskIntoConstraints = false
-        markerOverlay.backgroundColor = .clear
-        markerOverlay.isUserInteractionEnabled = false
-        addSubview(markerOverlay)
+        for overlay in [markerOverlay, periodOverlay] as [UIView] {
+            overlay.translatesAutoresizingMaskIntoConstraints = false
+            overlay.backgroundColor = .clear
+            overlay.isUserInteractionEnabled = false
+            addSubview(overlay)
+        }
 
         NSLayoutConstraint.activate([
             imageView.topAnchor.constraint(equalTo: topAnchor),
@@ -96,7 +108,15 @@ public final class WaterfallUIView: UIView {
             markerOverlay.bottomAnchor.constraint(equalTo: imageView.bottomAnchor),
             markerOverlay.leadingAnchor.constraint(equalTo: leadingAnchor),
             markerOverlay.trailingAnchor.constraint(equalTo: trailingAnchor),
+
+            periodOverlay.topAnchor.constraint(equalTo: topAnchor),
+            periodOverlay.bottomAnchor.constraint(equalTo: imageView.bottomAnchor),
+            periodOverlay.leadingAnchor.constraint(equalTo: leadingAnchor),
+            periodOverlay.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
+
+        periodOverlay.periodRows  = rowsPerPeriod
+        periodOverlay.rowHeight   = pixelRowHeight
 
         let tap = UITapGestureRecognizer(target: self, action: #selector(handleTap(_:)))
         addGestureRecognizer(tap)
@@ -127,12 +147,15 @@ public final class WaterfallUIView: UIView {
         freqOverlay.setNeedsDisplay()
 
         // Refresh frequency marker lines
-        markerOverlay.fLow        = fLow
-        markerOverlay.fHigh       = fHigh
-        markerOverlay.rxFreq      = rxFreq
-        markerOverlay.txFreq      = txFreq
+        markerOverlay.fLow         = fLow
+        markerOverlay.fHigh        = fHigh
+        markerOverlay.rxFreq       = rxFreq
+        markerOverlay.txFreq       = txFreq
         markerOverlay.transmitting = transmitting
         markerOverlay.setNeedsDisplay()
+
+        // Advance period line overlay — draws horizontal UTC timestamp lines
+        periodOverlay.addRow()
     }
 
     // MARK: - Colour mapping
@@ -241,6 +264,76 @@ final class FreqMarkerOverlay: UIView {
             .foregroundColor: UIColor.green
         ]
         ("\(Int(rxFreq))Hz" as NSString).draw(at: CGPoint(x: rx + 2, y: 2), withAttributes: attr)
+    }
+}
+
+// MARK: - Period Line Overlay
+
+/// Draws full-width horizontal yellow lines at each T/R period boundary,
+/// labelled with the UTC time — matching the WSJT-X desktop waterfall.
+final class PeriodLineOverlay: UIView {
+
+    /// Number of FFT rows between period boundary lines.
+    var periodRows: Int = 176   // default ≈ 15 s at 12 kHz, hop=1024
+    var rowHeight:  Int = 2
+
+    // Each entry: (y-offset from top in pixels, UTC label string)
+    private var lines: [(y: Int, label: String)] = []
+    private var rowCount: Int = 0
+    private let utcFormatter: DateFormatter = {
+        let f = DateFormatter()
+        f.dateFormat = "HH:mm:ss"
+        f.timeZone   = TimeZone(identifier: "UTC")
+        return f
+    }()
+
+    override init(frame: CGRect) { super.init(frame: frame); backgroundColor = .clear }
+    required init?(coder: NSCoder) { super.init(coder: coder) }
+
+    /// Call once per FFT row pushed to the waterfall.
+    func addRow() {
+        let totalHeight = Int(bounds.height)
+
+        // Scroll existing lines down by rowHeight
+        lines = lines.compactMap { entry in
+            let newY = entry.y + rowHeight
+            return newY < totalHeight ? (y: newY, label: entry.label) : nil
+        }
+
+        // At each period boundary, add a new line at y=0
+        if rowCount % periodRows == 0 {
+            let label = utcFormatter.string(from: Date())
+            lines.append((y: 0, label: label))
+        }
+        rowCount += 1
+        setNeedsDisplay()
+    }
+
+    override func draw(_ rect: CGRect) {
+        guard let ctx = UIGraphicsGetCurrentContext() else { return }
+        let labelAttr: [NSAttributedString.Key: Any] = [
+            .font:            UIFont.monospacedSystemFont(ofSize: 9, weight: .semibold),
+            .foregroundColor: UIColor.yellow.withAlphaComponent(0.9)
+        ]
+
+        for line in lines {
+            let y = CGFloat(line.y)
+
+            // Full-width dashed yellow line
+            ctx.setStrokeColor(UIColor.yellow.withAlphaComponent(0.55).cgColor)
+            ctx.setLineWidth(1)
+            ctx.setLineDash(phase: 0, lengths: [4, 3])
+            ctx.move(to: CGPoint(x: 0, y: y))
+            ctx.addLine(to: CGPoint(x: rect.width, y: y))
+            ctx.strokePath()
+
+            // UTC timestamp at the right edge
+            let labelSize = (line.label as NSString).size(withAttributes: labelAttr)
+            (line.label as NSString).draw(
+                at: CGPoint(x: rect.width - labelSize.width - 4, y: y + 1),
+                withAttributes: labelAttr
+            )
+        }
     }
 }
 

@@ -110,6 +110,7 @@ public final class AudioEngine: ObservableObject {
     /// `completion` is called on the main thread when playback finishes.
     public func transmit(symbols: [Int], mode: RadioMode,
                           baseFreq: Double = 1_000,
+                          toneSeparationOverride: Double? = nil,
                           completion: (() -> Void)? = nil) {
         guard engine.isRunning else {
             print("[AudioEngine] Engine not running — start RX first")
@@ -135,7 +136,9 @@ public final class AudioEngine: ObservableObject {
             // Reset the cancellation flag for this new transmission.
             self.cancelTX = false
 
-            let symLen       = Int(sampleRate / mode.toneSeparation)
+            // Use caller-supplied tone separation (e.g. Q65 period-aware) or fall back to mode default.
+            let toneSep = toneSeparationOverride ?? mode.toneSeparation
+            let symLen       = Int(sampleRate / toneSep)
             let totalSamples = symbols.count * symLen
             var wave  = [Float](repeating: 0, count: totalSamples)
             var phase: Double = 0
@@ -148,7 +151,7 @@ public final class AudioEngine: ObservableObject {
                     completion?()
                     return
                 }
-                let freq  = baseFreq + Double(sym) * mode.toneSeparation
+                let freq  = baseFreq + Double(sym) * toneSep
                 let start = i * symLen
                 for j in 0 ..< symLen {
                     wave[start + j] = Float(sin(2 * .pi * freq * Double(j) / sampleRate + phase))

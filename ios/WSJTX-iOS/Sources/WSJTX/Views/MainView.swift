@@ -65,11 +65,14 @@ struct WaterfallTabView: View {
 
                 // ── Waterfall ─────────────────────────────────────────────
                 WaterfallView(data: waterfall,
-                              dbLow:        Float(app.settings.waterfallLow),
-                              dbHigh:       Float(app.settings.waterfallHigh),
-                              rxFreq:       app.opConfig.rxFreq,
-                              txFreq:       app.opConfig.txFreq,
-                              transmitting: app.transmitting)
+                              dbLow:         Float(app.settings.waterfallLow),
+                              dbHigh:        Float(app.settings.waterfallHigh),
+                              rxFreq:        app.opConfig.rxFreq,
+                              txFreq:        app.opConfig.txFreq,
+                              transmitting:  app.transmitting,
+                              periodSeconds: app.currentMode == .q65
+                                  ? app.q65Config.period.rawValue
+                                  : Int(app.currentMode.cycleLength))
                     .frame(maxWidth: .infinity)
                     .frame(height: app.currentMode == .q65 ? 200 : 260)
 

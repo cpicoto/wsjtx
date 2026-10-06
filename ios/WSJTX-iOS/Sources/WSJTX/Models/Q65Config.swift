@@ -63,6 +63,21 @@ public enum Q65Period: Int, CaseIterable, Identifiable, Codable {
     public var id: Int { rawValue }
     public var label: String { "\(rawValue)s" }
 
+    /// Standard WSJT-X samples-per-symbol at 12 kHz for sub-mode A.
+    /// All 85 symbols fit within the T/R period with ~15% guard margin.
+    public var nspsAt12k: Int {
+        switch self {
+        case .p15:  return 1_800   // 85 × 150 ms = 12.75 s
+        case .p30:  return 3_600   // 85 × 300 ms = 25.5 s
+        case .p60:  return 6_912   // 85 × 576 ms = 48.96 s
+        case .p120: return 13_824  // 85 × 1152 ms = 97.9 s
+        case .p300: return 27_648  // 85 × 2304 ms = 195.8 s
+        }
+    }
+
+    /// Tone separation at 12 kHz for sub-mode A (base).
+    public var baseToneSeparation: Double { 12_000.0 / Double(nspsAt12k) }
+
     /// Recommended band/use-case hint.
     public var hint: String {
         switch self {
@@ -88,8 +103,21 @@ public final class Q65Config: ObservableObject {
     @Published public var period:  Q65Period  = .p60
 
     public var modeLabel: String { "Q65-\(period.rawValue)\(subMode.rawValue)" }
-    public var toneSeparation: Double { subMode.toneSeparation }
-    public var cycleLength: Double    { Double(period.rawValue) }
+
+    /// Effective tone separation (Hz) for the current period + sub-mode.
+    /// Falls back to period's base tone separation if the sub-mode is too
+    /// narrow to fit 85 symbols in the T/R period.
+    public var effectiveToneSeparation: Double {
+        subMode.toneSeparation(for: period) ?? period.baseToneSeparation
+    }
+
+    /// Human-readable warning when the sub-mode doesn't fit the period.
+    public var subModeWarning: String? {
+        guard subMode.toneSeparation(for: period) == nil else { return nil }
+        return "Sub-mode \(subMode.rawValue) too narrow for \(period.rawValue)s period; using A"
+    }
+
+    public var cycleLength: Double { Double(period.rawValue) }
 
     public init() {}
 }

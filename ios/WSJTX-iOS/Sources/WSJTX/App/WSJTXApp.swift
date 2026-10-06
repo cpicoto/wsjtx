@@ -81,16 +81,20 @@ final class AppState: ObservableObject {
         }
 
         let symbols: [Int]
+        let toneSepOverride: Double?
         switch currentMode {
         case .ft8, .ft4:
             let encoded = encoder.encode(message: message, mode: currentMode)
             guard !encoded.isEmpty else { txError = "Could not encode: \(message)"; return }
-            symbols = encoded
+            symbols       = encoded
+            toneSepOverride = nil
 
         case .q65:
             let encoded = q65Encoder.encode(message: message, subMode: q65Config.subMode)
             guard !encoded.isEmpty else { txError = "Could not encode Q65: \(message)"; return }
-            symbols = encoded
+            symbols       = encoded
+            // Use the period-correct tone separation — this is what fixes the wrong TX duration.
+            toneSepOverride = q65Config.effectiveToneSeparation
 
         default:
             txError = "\(currentMode.rawValue) TX not yet supported. Use FT8, FT4, or Q65."
@@ -99,8 +103,9 @@ final class AppState: ObservableObject {
 
         txError = nil
         let txHz = Double(opConfig.txFreq)
-        print("[TX] \(currentMode.rawValue) \(symbols.count) symbols @ \(Int(txHz))Hz: \(message)")
-        audioEngine.transmit(symbols: symbols, mode: currentMode, baseFreq: txHz) { [weak self] in
+        print("[TX] \(currentMode.rawValue) \(symbols.count) symbols @ \(Int(txHz))Hz (sep=\(String(format:"%.3f", toneSepOverride ?? currentMode.toneSeparation))Hz): \(message)")
+        audioEngine.transmit(symbols: symbols, mode: currentMode,
+                             baseFreq: txHz, toneSeparationOverride: toneSepOverride) { [weak self] in
             DispatchQueue.main.async { self?.transmitting = false }
         }
         transmitting = true

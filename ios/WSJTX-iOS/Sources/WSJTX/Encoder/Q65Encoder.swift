@@ -2,26 +2,37 @@ import Foundation
 
 // MARK: - Q65 Sub-mode
 
-/// Q65 sub-modes define the tone spacing. The T/R period is separate.
-/// For 1.2 GHz EME the standard is Q65-60A (60s period, sub-mode A spacing).
+/// Q65 sub-mode controls tone spacing WITHIN a period.
+/// Sub-mode A uses the base nsps for that period; each subsequent
+/// sub-mode doubles the nsps (halves tone spacing) for higher sensitivity.
+/// Only sub-mode/period combinations whose total duration < period are valid.
 public enum Q65SubMode: String, CaseIterable, Identifiable {
-    case a = "A"   // 1.736 Hz — default for 1.2 GHz / 432 MHz EME
-    case b = "B"   // 0.868 Hz
-    case c = "C"   // 0.434 Hz
-    case d = "D"   // 0.217 Hz
-    case e = "E"   // 0.109 Hz
+    case a = "A"
+    case b = "B"
+    case c = "C"
+    case d = "D"
+    case e = "E"
 
     public var id: String { rawValue }
 
-    /// Tone separation in Hz (= 12000 / nsps at 12 kHz).
-    public var toneSeparation: Double {
+    /// Multiplier applied to the period's base nsps.
+    public var nspsMultiplier: Int {
         switch self {
-        case .a: return 12_000.0 / 6_912.0   // ≈ 1.7361 Hz
-        case .b: return 12_000.0 / 13_824.0
-        case .c: return 12_000.0 / 27_648.0
-        case .d: return 12_000.0 / 55_296.0
-        case .e: return 12_000.0 / 110_592.0
+        case .a: return 1
+        case .b: return 2
+        case .c: return 4
+        case .d: return 8
+        case .e: return 16
         }
+    }
+
+    /// Effective tone separation for this sub-mode combined with a period.
+    /// Returns nil when the combination would exceed the T/R period.
+    public func toneSeparation(for period: Q65Period) -> Double? {
+        let nsps = period.nspsAt12k * nspsMultiplier
+        let totalSeconds = Double(nsps) * Double(Q65Protocol.totalSymbols) / 12_000.0
+        guard totalSeconds <= Double(period.rawValue) else { return nil }
+        return 12_000.0 / Double(nsps)
     }
 }
 
