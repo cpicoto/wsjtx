@@ -213,24 +213,32 @@ public final class AudioEngine: ObservableObject {
     }
 
     private func firLowPass(_ input: [Float], cutoff: Float, order: Int) -> [Float] {
-        // Kaiser-windowed sinc FIR.
-        let n = order + 1
+        // Hamming-windowed sinc FIR low-pass filter.
+        let n = order + 1   // filter length (taps)
         var kernel = [Float](repeating: 0, count: n)
         let M = Float(order)
         for i in 0 ..< n {
             let x = Float(i) - M / 2
             kernel[i] = x == 0 ? 2 * cutoff : sin(2 * .pi * cutoff * x) / (.pi * x)
-            // Hamming window
             kernel[i] *= 0.54 - 0.46 * cos(2 * .pi * Float(i) / M)
         }
+        // vDSP_conv requires the signal array to have at least N + P - 1 elements
+        // (N = output length, P = filter length). Without this padding the function
+        // reads heap memory beyond the array, which — depending on heap layout —
+        // can produce NaN or infinity floats that corrupt the RMS and max-out the
+        // level meter even in silence.
+        let paddedInput = input + [Float](repeating: 0, count: n - 1)
         var out = [Float](repeating: 0, count: input.count)
-        vDSP_conv(input, 1, kernel, 1, &out, 1, vDSP_Length(input.count), vDSP_Length(n))
+        vDSP_conv(paddedInput, 1, kernel, 1, &out, 1, vDSP_Length(input.count), vDSP_Length(n))
         return out
     }
 
     private func rms(_ samples: [Float]) -> Float {
+        guard !samples.isEmpty else { return 0 }
         var val: Float = 0
         vDSP_measqv(samples, 1, &val, vDSP_Length(samples.count))
-        return sqrt(val)
+        let result = sqrt(val)
+        // Guard against NaN / inf that could arise from heap garbage in vDSP_conv.
+        return result.isFinite ? result : 0
     }
 }
