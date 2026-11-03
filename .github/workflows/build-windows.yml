@@ -62,13 +62,27 @@ jobs:
             mingw-w64-x86_64-qt5-activeqt
             mingw-w64-x86_64-fftw
             mingw-w64-x86_64-boost
-            mingw-w64-x86_64-libusb
             mingw-w64-x86_64-portaudio
             mingw-w64-x86_64-pkg-config
             mingw-w64-x86_64-nsis
             mingw-w64-x86_64-osslsigncode
             mingw-w64-x86_64-ruby
             autoconf automake libtool
+
+      - name: Build libusb for MINGW64
+        run: |
+          git clone --depth 1 --branch v1.0.30 \
+            https://github.com/libusb/libusb.git libusb-src
+          cd libusb-src
+          autoreconf -fiv
+          ./configure \
+            --prefix="${MINGW_PREFIX}" \
+            --build="${MINGW_CHOST}" \
+            --host="${MINGW_CHOST}" \
+            --enable-shared \
+            --enable-static
+          make -j"$(nproc)"
+          make install
 
       # asciidoctor is a Ruby gem (no native MSYS2 package) — needed by
       # doc/CMakeLists.txt to build the WSJT-X user guide HTML referenced
